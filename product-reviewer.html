@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Group Reviewer</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/papaparse@5.3.2/papaparse.min.js"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/lucide.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        .confetti {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9999;
+        }
+        
+        .progress-bar {
+            background: linear-gradient(to right, #3b82f6 var(--progress, 0%), #e5e7eb var(--progress, 0%));
+            height: 12px;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+        
+        .card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
+        
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+        
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+        
+        .btn-outline {
+            background: white;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+        
+        .btn-outline:hover {
+            background: #f9fafb;
+        }
+        
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #3b82f6;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+        
+        .checkbox {
+            width: 16px;
+            height: 16px;
+            accent-color: #3b82f6;
+        }
+        
+        .select {
+            padding: 0.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.375rem;
+            background: white;
+            min-width: 200px;
+        }
+        
+        .input {
+            padding: 0.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.375rem;
+            background: white;
+        }
+        
+        .icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+        const { motion, AnimatePresence } = Motion;
+
+        // Sample data for the product reviewer
+        const SAMPLE_DATA = [
+            {
+                product_id: "1",
+                supplier: "BuildCorp",
+                name: "Portland Cement 25kg Bag",
+                suggested: "Concrete",
+                confidence: 0.95
+            },
+            {
+                product_id: "2",
+                supplier: "WoodWorks Ltd",
+                name: "Oak Hardwood Flooring 20mm",
+                suggested: "Timber",
+                confidence: 0.88
+            },
+            {
+                product_id: "3",
+                supplier: "SteelMax",
+                name: "Reinforcing Steel Bar 12mm",
+                suggested: "Concrete",
+                confidence: 0.75
+            },
+            {
+                product_id: "4",
+                supplier: "BrickCo",
+                name: "Red Clay Bricks 215x102x65mm",
+                suggested: "Bricks & Blocks",
+                confidence: 0.92
+            },
+            {
+                product_id: "5",
+                supplier: "InsuloPro",
+                name: "Mineral Wool Insulation 100mm",
+                suggested: "Insulation",
+                confidence: 0.85
+            },
+            {
+                product_id: "6",
+                supplier: "AggSupply",
+                name: "20mm Crushed Stone Aggregate",
+                suggested: "Aggregate",
+                confidence: 0.90
+            },
+            {
+                product_id: "7",
+                supplier: "PlasterPlus",
+                name: "Gypsum Plasterboard 12.5mm",
+                suggested: "Plasterboard",
+                confidence: 0.87
+            },
+            {
+                product_id: "8",
+                supplier: "TimberCraft",
+                name: "Treated Pine Lumber 90x45mm",
+                suggested: "Timber",
+                confidence: 0.82
+            }
+        ];
+
+        const DEFAULT_CLASSES = [
+            "Aggregate",
+            "Aluminium",
+            "Asphalt",
+            "Bricks & Blocks",
+            "Cement",
+            "Cladding",
+            "Concrete",
+            "Electrical",
+            "Finishes",
+            "Furnishings",
+            "Glass",
+            "Insulation",
+            "Mechanical",
+            "Metals",
+            "Network Systems",
+            "Openings",
+            "Other",
+            "Plasterboard",
+            "Plumbing",
+            "Timber",
+        ];
+
+        const STORAGE_KEY = "pgr_session_preview";
+
+        function useLocalSession() {
+            const [session, setSession] = useState({ labeled: {} });
+            
+            useEffect(() => {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    try { 
+                        setSession(JSON.parse(raw)); 
+                    } catch {}
+                }
+            }, []);
+            
+            useEffect(() => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+            }, [session]);
+            
+            return { session, setSession };
+        }
+
+        // Simplified UI Components
+        function Card({ children, className = "" }) {
+            return <div className={`card p-6 ${className}`}>{children}</div>;
+        }
+
+        function Button({ children, onClick, variant = "primary", disabled = false, className = "" }) {
+            const variantClass = variant === "secondary" ? "btn-secondary" : 
+                               variant === "outline" ? "btn-outline" : "btn-primary";
+            return (
+                <button 
+                    className={`btn ${variantClass} ${className}`}
+                    onClick={onClick}
+                    disabled={disabled}
+                >
+                    {children}
+                </button>
+            );
+        }
+
+        function Badge({ children, variant = "default" }) {
+            return <span className="badge">{children}</span>;
+        }
+
+        function Progress({ value }) {
+            return (
+                <div className="progress-bar" style={{"--progress": `${value}%`}}></div>
+            );
+        }
+
+        function Switch({ checked, onCheckedChange }) {
+            return (
+                <label className="switch">
+                    <input 
+                        type="checkbox" 
+                        checked={checked}
+                        onChange={(e) => onCheckedChange(e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                </label>
+            );
+        }
+
+        function Select({ children, onValueChange, placeholder, value, onReset }) {
+            return (
+                <select 
+                    className="select"
+                    value={value || ""}
+                    onChange={(e) => onValueChange(e.target.value)}
+                >
+                    <option value="" disabled>{placeholder}</option>
+                    {children}
+                </select>
+            );
+        }
+
+        function SelectItem({ children, value }) {
+            return <option value={value}>{children}</option>;
+        }
+
+        function Checkbox({ checked, onCheckedChange }) {
+            return (
+                <input 
+                    type="checkbox"
+                    className="checkbox"
+                    checked={checked}
+                    onChange={(e) => onCheckedChange(e.target.checked)}
+                />
+            );
+        }
+
+        // Similarity functions
+        function tfidfScore(a, b) {
+            const A = a.toLowerCase().split(/\W+/).filter(Boolean);
+            const B = b.toLowerCase().split(/\W+/).filter(Boolean);
+            if (!A.length || !B.length) return 0;
+            
+            // Enhanced word weighting for product similarity
+            const importantWords = new Set([
+                'matt', 'matte', 'gloss', 'satin', 'eggshell', 'silk',
+                'white', 'black', 'red', 'blue', 'green', 'yellow', 'grey', 'gray',
+                'paint', 'primer', 'undercoat', 'topcoat', 'emulsion',
+                'trade', 'contract', 'diamond', 'professional',
+                'interior', 'exterior', 'wood', 'metal', 'masonry'
+            ]);
+            
+            const all = [...A, ...B];
+            const freq = {};
+            for (const w of all) freq[w] = (freq[w] || 0) + 1;
+            
+            let inter = 0, denom = 0;
+            const setA = new Set(A);
+            const setB = new Set(B);
+            const union = new Set([...setA, ...setB]);
+            
+            for (const w of union) {
+                // Give extra weight to important product characteristics
+                const weight = importantWords.has(w) ? 2.0 : 1.0;
+                const idf = weight / Math.sqrt(freq[w]);
+                denom += idf;
+                if (setA.has(w) && setB.has(w)) inter += idf;
+            }
+            return inter / (denom || 1);
+        }
+
+        function partial_ratio(a, b) {
+            const A = a.toLowerCase();
+            const B = b.toLowerCase();
+            if (A === B) return 100;
+            if (A && (B.includes(A) || A.includes(B))) return 95;
+            
+            const wa = A.split(/\W+/).filter(Boolean);
+            const wb = B.split(/\W+/).filter(Boolean);
+            
+            // Filter out size/quantity indicators for better matching
+            const sizeWords = new Set(['lt', 'l', 'litre', 'liter', 'ml', 'kg', 'g', 'gram', 'gallon', 'pint', 'quart']);
+            const numericPattern = /^[\d.]+$/;
+            const codePattern = /^[a-z]*\d+[a-z]*$/i; // Match codes like RAL9003, ND, etc.
+            
+            const filterWords = (words) => words.filter(w => 
+                !sizeWords.has(w) && 
+                !numericPattern.test(w) && 
+                !codePattern.test(w) &&
+                w.length > 1
+            );
+            
+            const filteredA = filterWords(wa);
+            const filteredB = filterWords(wb);
+            
+            if (filteredA.length === 0 || filteredB.length === 0) {
+                // Fallback to original logic if filtering removes everything
+                const setB = new Set(wb);
+                const overlap = wa.filter(x => setB.has(x)).length;
+                return Math.round((overlap / Math.max(wa.length, 1)) * 100);
+            }
+            
+            const setB = new Set(filteredB);
+            const overlap = filteredA.filter(x => setB.has(x)).length;
+            
+            // Special boost for paint/coating products
+            const paintTerms = ['trade', 'matt', 'matte', 'gloss', 'satin', 'paint', 'emulsion', 'primer'];
+            const finishTerms = ['white', 'black', 'base', 'light', 'dark'];
+            
+            let boost = 0;
+            const hasSharedPaintTerms = paintTerms.some(term => 
+                filteredA.includes(term) && filteredB.includes(term)
+            );
+            const hasSharedFinishTerms = finishTerms.some(term => 
+                filteredA.includes(term) && filteredB.includes(term)
+            );
+            
+            if (hasSharedPaintTerms) boost += 15;
+            if (hasSharedFinishTerms) boost += 10;
+            
+            const baseScore = Math.round((overlap / Math.max(filteredA.length, 1)) * 100);
+            return Math.min(100, baseScore + boost);
+        }
+
+        // Main Component
+        function ProductGroupReviewer() {
+            const { session, setSession } = useLocalSession();
+            const [items, setItems] = useState(SAMPLE_DATA);
+            const [classes, setClasses] = useState(DEFAULT_CLASSES);
+            const [orderByLowConf, setOrderByLowConf] = useState(true);
+            const [index, setIndex] = useState(0);
+            const [pendingReassign, setPendingReassign] = useState(null);
+            const [streak, setStreak] = useState(0);
+            const [showConfetti, setShowConfetti] = useState(false);
+            const [similarityThreshold, setSimilarityThreshold] = useState(0.75);
+            const [selectedBatch, setSelectedBatch] = useState({});
+
+            // Build review queue
+            const queue = useMemo(() => {
+                const doneIds = new Set(Object.keys(session.labeled));
+                const remaining = items.filter((it) => !doneIds.has(it.product_id));
+                if (orderByLowConf) {
+                    remaining.sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1));
+                }
+                return remaining;
+            }, [items, session.labeled, orderByLowConf]);
+
+            const total = items.length;
+            const completed = Object.keys(session.labeled).length;
+            const progress = total ? Math.round((completed / total) * 100) : 0;
+            const current = queue[index] ?? undefined;
+
+            // Similar items calculation
+            const similar = useMemo(() => {
+                if (!current) return [];
+                const out = [];
+                for (const it of items) {
+                    if (!it || it.product_id === current.product_id) continue;
+                    if (session.labeled[it.product_id]) continue;
+                    
+                    const simT = tfidfScore(current.name, it.name);
+                    const simP = partial_ratio(current.name, it.name) / 100;
+                    // Adjusted weighting: more emphasis on partial ratio for product names
+                    const score = 0.4 * simT + 0.6 * simP;
+                    out.push({ item: it, score });
+                }
+                out.sort((a, b) => b.score - a.score);
+                return out.slice(0, 10);
+            }, [current, items, session.labeled]);
+
+            // Auto-select similar items
+            useEffect(() => {
+                // Clear batch and auto-select when current item changes or threshold changes
+                const newBatch = {};
+                
+                // Auto-select items that meet the threshold
+                for (const s of similar) {
+                    const itemId = s.item.product_id;
+                    if (s.score >= similarityThreshold) {
+                        newBatch[itemId] = true;
+                    }
+                }
+                
+                setSelectedBatch(newBatch);
+            }, [current?.product_id, similar, similarityThreshold]);
+
+            function labelAndNext(l) {
+                setSession((prev) => ({ 
+                    labeled: { ...prev.labeled, [l.product_id]: l } 
+                }));
+                setStreak((s) => s + 1);
+                
+                if ((completed + 1) % 5 === 0) {
+                    setShowConfetti(true);
+                    setTimeout(() => setShowConfetti(false), 2500);
+                }
+                
+                setPendingReassign(null);
+                // Stay at current index, the queue will automatically update and show next item
+                // If we're at the end, the component will show completion screen
+            }
+
+            function batchApply(makeLabel) {
+                const selectedIds = Object.entries(selectedBatch)
+                    .filter(([, v]) => v)
+                    .map(([k]) => k);
+                    
+                const dict = {};
+                if (current) dict[current.product_id] = makeLabel(current);
+                
+                for (const id of selectedIds) {
+                    const it = items.find(x => x.product_id === id);
+                    if (it) dict[id] = makeLabel(it);
+                }
+                
+                setSession((prev) => ({ 
+                    labeled: { ...prev.labeled, ...dict } 
+                }));
+                setStreak((s) => s + 1 + selectedIds.length);
+                
+                if ((completed + 1 + selectedIds.length) % 5 === 0) {
+                    setShowConfetti(true);
+                    setTimeout(() => setShowConfetti(false), 2500);
+                }
+                
+                setPendingReassign(null);
+                setSelectedBatch({}); // Clear the selected batch
+                
+                // Reset index to 0 to ensure we're at the start of the remaining queue
+                setIndex(0);
+            }
+
+            function handleAccept() {
+                if (!current) return;
+                batchApply((it) => ({
+                    ...it,
+                    decision: "accept",
+                    final_class: it.suggested ?? "UNKNOWN",
+                    decided_at: new Date().toISOString(),
+                }));
+            }
+
+            function handleUnknown() {
+                if (!current) return;
+                batchApply((it) => ({
+                    ...it,
+                    decision: "unknown",
+                    final_class: "UNKNOWN",
+                    decided_at: new Date().toISOString(),
+                }));
+            }
+
+            function handleSkip() {
+                setStreak(0);
+                setIndex((i) => Math.min(i + 1, Math.max(queue.length - 1, 0)));
+            }
+
+            function handleBack() {
+                setStreak(0);
+                const lastId = Object.keys(session.labeled).pop();
+                if (!lastId) return;
+                
+                setSession((prev) => {
+                    const copy = { ...prev.labeled };
+                    delete copy[lastId];
+                    return { labeled: copy };
+                });
+            }
+
+            function onReassignConfirm() {
+                if (!current || !pendingReassign) return;
+                const target = pendingReassign;
+                batchApply((it) => ({
+                    ...it,
+                    decision: "reassign",
+                    final_class: target,
+                    decided_at: new Date().toISOString(),
+                }));
+            }
+
+            function handleUploadCSV(file) {
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: (res) => {
+                        const rows = res.data.map((r) => ({
+                            product_id: String(r.product_id ?? r.id ?? Math.random().toString(36)),
+                            supplier: String(r.supplier ?? r.vendor ?? ""),
+                            name: String(r.name ?? r.title ?? ""),
+                            suggested: r.suggested ? String(r.suggested) : undefined,
+                            confidence: r.confidence ? Number(r.confidence) : undefined,
+                        }));
+                        setItems(rows.filter((r) => r.name));
+                        setIndex(0);
+                    },
+                });
+            }
+
+            function handleExportCSV() {
+                const labeled = Object.values(session.labeled);
+                const csv = Papa.unparse(labeled);
+                const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `labels_${new Date().toISOString().slice(0,10)}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+
+            function handleReset() {
+                if (confirm("Are you sure you want to reset all progress? This will clear all your classifications and cannot be undone.")) {
+                    setSession({ labeled: {} });
+                    setIndex(0);
+                    setStreak(0);
+                    setPendingReassign(null);
+                    setSelectedBatch({});
+                    localStorage.removeItem(STORAGE_KEY);
+                }
+            }
+
+            return (
+                <div className="min-h-screen" style={{background: "linear-gradient(to bottom, #f8fafc, white)", padding: "24px"}}>
+                    {showConfetti && (
+                        <div className="confetti">
+                            <div style={{
+                                position: "absolute",
+                                top: "50%",
+                                left: "50%",
+                                transform: "translate(-50%, -50%)",
+                                fontSize: "48px",
+                                color: "#3b82f6",
+                                fontWeight: "bold"
+                            }}>
+                                🎉 Great job! 🎉
+                            </div>
+                        </div>
+                    )}
+                    
+                    <div style={{maxWidth: "1200px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "24px"}}>
+                        <header style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
+                            <div>
+                                <h1 style={{fontSize: "32px", fontWeight: "bold", margin: 0}}>Product Group Reviewer</h1>
+                                <p style={{color: "#64748b", margin: "8px 0 0 0"}}>
+                                    Browser-compatible build with <strong>Similar Items</strong> batch functionality.
+                                </p>
+                            </div>
+                            <div style={{display: "flex", alignItems: "center", gap: "8px"}}>
+                                <Badge>Streak: {streak}</Badge>
+                                <Button variant="outline" onClick={handleExportCSV}>
+                                    📥 Export Labels
+                                </Button>
+                                <Button variant="outline" onClick={handleReset}>
+                                    🔄 Reset Progress
+                                </Button>
+                            </div>
+                        </header>
+
+                        <div style={{display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px", alignItems: "center"}}>
+                            <div>
+                                <div style={{display: "flex", alignItems: "center", gap: "12px"}}>
+                                    <div style={{flex: 1}}>
+                                        <Progress value={progress} />
+                                        <div style={{display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#64748b", marginTop: "4px"}}>
+                                            <span>{completed} / {total} labeled</span>
+                                            <span>{progress}% complete</span>
+                                        </div>
+                                    </div>
+                                    <div style={{display: "flex", alignItems: "center", gap: "8px"}}>
+                                        <Switch checked={orderByLowConf} onCheckedChange={setOrderByLowConf} />
+                                        <span style={{fontSize: "14px", color: "#374151"}}>Lowest confidence first</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{display: "flex", justifyContent: "flex-end", gap: "8px"}}>
+                                <label style={{display: "inline-flex", alignItems: "center", gap: "8px", cursor: "pointer"}}>
+                                    📤
+                                    <input 
+                                        type="file" 
+                                        accept=".csv" 
+                                        className="input"
+                                        onChange={(e) => {
+                                            const f = e.target.files?.[0];
+                                            if (f) handleUploadCSV(f);
+                                        }} 
+                                    />
+                                </label>
+                            </div>
+                        </div>
+
+                        <Card>
+                            {current ? (
+                                <div style={{display: "grid", gridTemplateColumns: "2fr 1fr", gap: "24px"}}>
+                                    {/* Main detail */}
+                                    <div style={{display: "flex", flexDirection: "column", gap: "16px"}}>
+                                        <div>
+                                            <div style={{fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#64748b"}}>
+                                                Supplier
+                                            </div>
+                                            <div style={{fontSize: "18px", fontWeight: "500", marginTop: "4px"}}>
+                                                {current.supplier || <em style={{color: "#94a3b8"}}>(unknown)</em>}
+                                            </div>
+                                        </div>
+                                        
+                                        <div>
+                                            <div style={{fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#64748b"}}>
+                                                Product Name
+                                            </div>
+                                            <div style={{fontSize: "20px", fontWeight: "600", lineHeight: "1.3", marginTop: "4px"}}>
+                                                {current.name}
+                                            </div>
+                                        </div>
+                                        
+                                        <div>
+                                            <div style={{fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#64748b"}}>
+                                                LLM Suggested Group
+                                            </div>
+                                            <div style={{display: "flex", alignItems: "center", gap: "8px", marginTop: "4px"}}>
+                                                <Badge>{current.suggested ?? "(none)"}</Badge>
+                                                {typeof current.confidence === "number" && (
+                                                    <span style={{fontSize: "12px", color: "#64748b"}}>
+                                                        conf: {(current.confidence*100).toFixed(0)}%
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Actions */}
+                                        <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "8px"}}>
+                                            <Button onClick={handleAccept}>
+                                                ✓ Accept (A)
+                                            </Button>
+
+                                            <div style={{display: "flex", gap: "8px"}}>
+                                                <Select 
+                                                    value={pendingReassign || ""}
+                                                    onValueChange={setPendingReassign} 
+                                                    placeholder="Reassign to… (R)"
+                                                >
+                                                    {classes.map((c) => (
+                                                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                                                    ))}
+                                                </Select>
+                                                <Button 
+                                                    variant="secondary" 
+                                                    onClick={onReassignConfirm} 
+                                                    disabled={!pendingReassign}
+                                                >
+                                                    Reassign
+                                                </Button>
+                                            </div>
+
+                                            <Button variant="outline" onClick={handleUnknown}>
+                                                ❓ Unknown (U)
+                                            </Button>
+
+                                            <div style={{display: "flex", gap: "8px"}}>
+                                                <Button variant="outline" onClick={handleSkip}>
+                                                    ⏭️ Skip (S)
+                                                </Button>
+                                                <Button variant="outline" onClick={handleBack}>
+                                                    ↶ Back (B)
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Similar items sidebar */}
+                                    <div style={{borderLeft: "1px solid #e5e7eb", paddingLeft: "24px"}}>
+                                        <h3 style={{fontSize: "16px", fontWeight: "600", marginBottom: "12px"}}>
+                                            🔍 Similar Items
+                                        </h3>
+                                        
+                                        <div style={{marginBottom: "12px"}}>
+                                            <label style={{fontSize: "12px", color: "#64748b"}}>
+                                                Similarity threshold: {similarityThreshold.toFixed(2)}
+                                            </label>
+                                            <input 
+                                                type="range"
+                                                min="0.3"
+                                                max="1.0"
+                                                step="0.05"
+                                                value={similarityThreshold}
+                                                onChange={(e) => setSimilarityThreshold(Number(e.target.value))}
+                                                style={{width: "100%", marginTop: "4px"}}
+                                            />
+                                        </div>
+
+                                        <div style={{fontSize: "12px", color: "#64748b", marginBottom: "8px"}}>
+                                            Select items to apply the same action:
+                                        </div>
+
+                                        <div style={{maxHeight: "300px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px"}}>
+                                            {similar.length === 0 ? (
+                                                <div style={{fontSize: "12px", color: "#94a3b8", fontStyle: "italic"}}>
+                                                    No similar items found
+                                                </div>
+                                            ) : (
+                                                similar.map(({ item, score }) => (
+                                                    <div 
+                                                        key={item.product_id}
+                                                        style={{
+                                                            display: "flex",
+                                                            alignItems: "flex-start",
+                                                            gap: "8px",
+                                                            padding: "8px",
+                                                            border: "1px solid #e5e7eb",
+                                                            borderRadius: "6px",
+                                                            background: selectedBatch[item.product_id] ? "#eff6ff" : "white"
+                                                        }}
+                                                    >
+                                                        <Checkbox
+                                                            checked={selectedBatch[item.product_id] || false}
+                                                            onCheckedChange={(checked) => 
+                                                                setSelectedBatch(prev => ({
+                                                                    ...prev,
+                                                                    [item.product_id]: checked
+                                                                }))
+                                                            }
+                                                        />
+                                                        <div style={{flex: 1, minWidth: 0}}>
+                                                            <div style={{
+                                                                fontSize: "13px",
+                                                                fontWeight: "500",
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                whiteSpace: "nowrap"
+                                                            }}>
+                                                                {item.name}
+                                                            </div>
+                                                            <div style={{fontSize: "11px", color: "#64748b"}}>
+                                                                {item.supplier} • {(score * 100).toFixed(0)}% match
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+
+                                        {Object.values(selectedBatch).some(Boolean) && (
+                                            <div style={{marginTop: "12px", padding: "8px", background: "#f0f9ff", borderRadius: "6px", border: "1px solid #0ea5e9"}}>
+                                                <div style={{fontSize: "12px", color: "#0c4a6e", fontWeight: "500"}}>
+                                                    Batch Action Preview
+                                                </div>
+                                                <div style={{fontSize: "11px", color: "#075985", marginTop: "2px"}}>
+                                                    {1 + Object.values(selectedBatch).filter(Boolean).length} items will be processed together
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={{textAlign: "center", padding: "48px"}}>
+                                    <h2 style={{fontSize: "24px", fontWeight: "600", marginBottom: "8px"}}>
+                                        🎉 All items reviewed!
+                                    </h2>
+                                    <p style={{color: "#64748b", marginBottom: "16px"}}>
+                                        You've completed the review of all {total} products.
+                                    </p>
+                                    <div style={{marginBottom: "16px"}}>
+                                        <Button onClick={handleExportCSV}>
+                                            📥 Export Final Results
+                                        </Button>
+                                        <Button variant="outline" onClick={handleReset} style={{marginLeft: "8px"}}>
+                                            🔄 Start Over
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </Card>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render the app
+        ReactDOM.render(<ProductGroupReviewer />, document.getElementById('root'));
+    </script>
+</body>
+</html>
