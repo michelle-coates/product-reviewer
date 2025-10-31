@@ -479,22 +479,53 @@
 
             // Auto-select similar items
             useEffect(() => {
-                // Clear batch and auto-select when current item changes or threshold changes
+                // Only auto-select when moving to a new item, not on threshold changes
+                if (!current) {
+                    setSelectedBatch({});
+                    return;
+                }
+                
+                // Clear batch and auto-select for new item
                 const newBatch = {};
                 
-                // Only include items that are actually in the similar list
-                const availableIds = new Set(similar.map(s => s.item.product_id));
-                
-                // Auto-select items that meet the threshold AND are still available
+                // Auto-select items that meet the threshold
                 for (const s of similar) {
                     const itemId = s.item.product_id;
-                    if (s.score >= similarityThreshold) {
+                    if (!session.labeled[itemId] && s.score >= similarityThreshold) {
                         newBatch[itemId] = true;
                     }
                 }
                 
                 setSelectedBatch(newBatch);
-            }, [current?.product_id, similar, similarityThreshold]);
+            }, [current?.product_id]); // Only trigger on item change, not threshold change
+
+            // Separate effect to handle threshold changes without overriding manual selections
+            useEffect(() => {
+                if (!current) return;
+                
+                setSelectedBatch(prev => {
+                    const newBatch = {};
+                    
+                    // Keep existing manual selections for available items
+                    const availableIds = new Set(similar.filter(s => !session.labeled[s.item.product_id]).map(s => s.item.product_id));
+                    
+                    for (const [id, selected] of Object.entries(prev)) {
+                        if (availableIds.has(id)) {
+                            newBatch[id] = selected; // Preserve manual choice
+                        }
+                    }
+                    
+                    // Only auto-select items that weren't previously in the batch
+                    for (const s of similar) {
+                        const itemId = s.item.product_id;
+                        if (!session.labeled[itemId] && !(itemId in prev) && s.score >= similarityThreshold) {
+                            newBatch[itemId] = true;
+                        }
+                    }
+                    
+                    return newBatch;
+                });
+            }, [similarityThreshold, similar, session.labeled]);
 
             function labelAndNext(l) {
                 setSession((prev) => ({ 
