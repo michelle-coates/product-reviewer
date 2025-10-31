@@ -482,7 +482,10 @@
                 // Clear batch and auto-select when current item changes or threshold changes
                 const newBatch = {};
                 
-                // Auto-select items that meet the threshold
+                // Only include items that are actually in the similar list
+                const availableIds = new Set(similar.map(s => s.item.product_id));
+                
+                // Auto-select items that meet the threshold AND are still available
                 for (const s of similar) {
                     const itemId = s.item.product_id;
                     if (s.score >= similarityThreshold) {
@@ -806,44 +809,49 @@
                                                     No similar items found
                                                 </div>
                                             ) : (
-                                                similar.map(({ item, score }) => (
-                                                    <div 
-                                                        key={item.product_id}
-                                                        style={{
-                                                            display: "flex",
-                                                            alignItems: "flex-start",
-                                                            gap: "8px",
-                                                            padding: "8px",
-                                                            border: "1px solid #e5e7eb",
-                                                            borderRadius: "6px",
-                                                            background: selectedBatch[item.product_id] ? "#eff6ff" : "white"
-                                                        }}
-                                                    >
-                                                        <Checkbox
-                                                            checked={selectedBatch[item.product_id] || false}
-                                                            onCheckedChange={(checked) => 
-                                                                setSelectedBatch(prev => ({
-                                                                    ...prev,
-                                                                    [item.product_id]: checked
-                                                                }))
-                                                            }
-                                                        />
-                                                        <div style={{flex: 1, minWidth: 0}}>
-                                                            <div style={{
-                                                                fontSize: "13px",
-                                                                fontWeight: "500",
-                                                                overflow: "hidden",
-                                                                textOverflow: "ellipsis",
-                                                                whiteSpace: "nowrap"
-                                                            }}>
-                                                                {item.name}
-                                                            </div>
-                                                            <div style={{fontSize: "11px", color: "#64748b"}}>
-                                                                {item.supplier} • {(score * 100).toFixed(0)}% match
+                                                similar.map(({ item, score }) => {
+                                                    // Only show items that haven't been labeled
+                                                    if (session.labeled[item.product_id]) return null;
+                                                    
+                                                    return (
+                                                        <div 
+                                                            key={item.product_id}
+                                                            style={{
+                                                                display: "flex",
+                                                                alignItems: "flex-start",
+                                                                gap: "8px",
+                                                                padding: "8px",
+                                                                border: "1px solid #e5e7eb",
+                                                                borderRadius: "6px",
+                                                                background: selectedBatch[item.product_id] ? "#eff6ff" : "white"
+                                                            }}
+                                                        >
+                                                            <Checkbox
+                                                                checked={selectedBatch[item.product_id] || false}
+                                                                onCheckedChange={(checked) => 
+                                                                    setSelectedBatch(prev => ({
+                                                                        ...prev,
+                                                                        [item.product_id]: checked
+                                                                    }))
+                                                                }
+                                                            />
+                                                            <div style={{flex: 1, minWidth: 0}}>
+                                                                <div style={{
+                                                                    fontSize: "13px",
+                                                                    fontWeight: "500",
+                                                                    overflow: "hidden",
+                                                                    textOverflow: "ellipsis",
+                                                                    whiteSpace: "nowrap"
+                                                                }}>
+                                                                    {item.name}
+                                                                </div>
+                                                                <div style={{fontSize: "11px", color: "#64748b"}}>
+                                                                    {item.supplier} • {(score * 100).toFixed(0)}% match
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                ))
+                                                    );
+                                                }).filter(Boolean)
                                             )}
                                         </div>
 
