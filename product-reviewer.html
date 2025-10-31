@@ -482,11 +482,15 @@
                     const simP = partial_ratio(current.name, it.name) / 100;
                     // Adjusted weighting: more emphasis on partial ratio for product names
                     const score = 0.4 * simT + 0.6 * simP;
-                    out.push({ item: it, score });
+                    
+                    // Only include items that meet the similarity threshold
+                    if (score >= similarityThreshold) {
+                        out.push({ item: it, score });
+                    }
                 }
                 out.sort((a, b) => b.score - a.score);
-                return out.slice(0, 10);
-            }, [current, items, session.labeled]);
+                return out.slice(0, 10); // Still limit to top 10 for UI performance
+            }, [current, items, session.labeled, similarityThreshold]);
 
             // Auto-select similar items
             useEffect(() => {
