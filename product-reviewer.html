@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Product Group Reviewer</title>
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABWklEQVR4AZSPsauBURjGf/feuossIgPZLQbJJFnEZrOapCzKqmz8D0aJMiiTlMnCIAwii5XEZuCK3HM6Pq5OudT7vOf5zvs+v77zeYG80I/Q5U3JTP4TyAl9C71bMpOTAGn0sM0GwaCS3a7P1c23BChrdJcLGg1YraDbVVouodkEq9XYup2PgK8vqNVgOIRwGCwWcLuh3YZYDCqVW9Awj4DzGQIBKJWgWgWzGeZzyGTUfiQCJpPy1/4IuF6SzYJ892ajbiRYutMJDC+/hXTAxwckErBYwH4vVkTF46KJajbhcBDmXjrA5wOHAwYDSCah1YJiEUYjSKfvyavTAaGQGo3H0OtBvQ7RKPj9sN2q2Z+uA7xeNV6vYTqFchk6He3tagl0gNOpZrudOv/pOsAIyD8w/JNTB6RS4PFAv/8kdh9JwPH+KdxsBpOJMC/VUQIKYvURIi5eKJkp/AIAAP//GbHGGAAAAAZJREFUAwBtEXLzW3c1JQAAAABJRU5ErkJggg==">
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,15 +14,6 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/lucide.min.css" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <style>
-        .confetti {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 9999;
-        }
         
         .progress-bar {
             background: linear-gradient(to right, #3b82f6 var(--progress, 0%), #e5e7eb var(--progress, 0%));
@@ -206,7 +198,7 @@
                 product_id: "4",
                 supplier: "BrickCo",
                 name: "Red Clay Bricks 215x102x65mm",
-                suggested: "Bricks & Blocks",
+                suggested: "Bricks and Blocks",
                 confidence: 0.92
             },
             {
@@ -243,12 +235,15 @@
             "Aggregate",
             "Aluminium",
             "Asphalt",
-            "Bricks & Blocks",
+            "Bricks and Blocks",
             "Cement",
             "Cladding",
             "Concrete",
+            "Earthworks",
             "Electrical",
+            "Fasteners",
             "Finishes",
+            "Fuels",
             "Furnishings",
             "Glass",
             "Insulation",
@@ -259,8 +254,11 @@
             "Other",
             "Plasterboard",
             "Plumbing",
+            "Precast Concrete",
+            "Rebar",
             "Structural Steel",
             "Timber",
+            "Tools and Equipment",
         ];
 
         const STORAGE_KEY = "pgr_session_preview";
@@ -367,7 +365,7 @@
                 'white', 'black', 'red', 'blue', 'green', 'yellow', 'grey', 'gray',
                 'paint', 'primer', 'undercoat', 'topcoat', 'emulsion',
                 'trade', 'contract', 'diamond', 'professional',
-                'interior', 'exterior', 'wood', 'metal', 'masonry'
+                'interior', 'exterior', 'wood', 'metal', 'brick', 'block',
             ]);
             
             const all = [...A, ...B];
@@ -447,11 +445,12 @@
             const { session, setSession } = useLocalSession();
             const [items, setItems] = useState(SAMPLE_DATA);
             const [classes, setClasses] = useState(DEFAULT_CLASSES);
-            const [orderByLowConf, setOrderByLowConf] = useState(true);
+            const [categories, setCategories] = useState({});
+            const [groupBySupplier, setGroupBySupplier] = useState(true);
             const [index, setIndex] = useState(0);
             const [pendingReassign, setPendingReassign] = useState(null);
+            const [lastSupplier, setLastSupplier] = useState(null);
             const [streak, setStreak] = useState(0);
-            const [showConfetti, setShowConfetti] = useState(false);
             const [similarityThreshold, setSimilarityThreshold] = useState(0.50);
             const [selectedBatch, setSelectedBatch] = useState({});
 
@@ -459,16 +458,89 @@
             const queue = useMemo(() => {
                 const doneIds = new Set(Object.keys(session.labeled));
                 const remaining = items.filter((it) => !doneIds.has(it.product_id));
-                if (orderByLowConf) {
-                    remaining.sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1));
+                
+                if (groupBySupplier) {
+                    // Group by supplier, then sort within each group by confidence
+                    const supplierGroups = {};
+                    
+                    remaining.forEach(item => {
+                        const supplier = item.supplier || 'Unknown';
+                        if (!supplierGroups[supplier]) {
+                            supplierGroups[supplier] = [];
+                        }
+                        supplierGroups[supplier].push(item);
+                    });
+                    
+                    // Sort each supplier group by confidence (lowest first)
+                    Object.values(supplierGroups).forEach(group => {
+                        group.sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1));
+                    });
+                    
+                    // Sort suppliers by their lowest confidence product to prioritize challenging suppliers
+                    const sortedSuppliers = Object.entries(supplierGroups)
+                        .sort(([,a], [,b]) => {
+                            const minConfA = Math.min(...a.map(item => item.confidence ?? 1));
+                            const minConfB = Math.min(...b.map(item => item.confidence ?? 1));
+                            return minConfA - minConfB;
+                        });
+                    
+                    // Flatten back to single array
+                    return sortedSuppliers.flatMap(([supplier, items]) => items);
                 }
+                
                 return remaining;
-            }, [items, session.labeled, orderByLowConf]);
+            }, [items, session.labeled, groupBySupplier]);
 
             const total = items.length;
             const completed = Object.keys(session.labeled).length;
             const progress = total ? Math.round((completed / total) * 100) : 0;
             const current = queue[index] ?? undefined;
+
+            // Auto-select most common category for supplier grouping
+            useEffect(() => {
+                if (!current || !groupBySupplier) {
+                    setLastSupplier(null);
+                    return;
+                }
+                
+                const currentSupplier = current.supplier || "(unknown)";
+                
+                // Only auto-select if we're moving to a new supplier or first time
+                if (lastSupplier !== currentSupplier) {
+                    setLastSupplier(currentSupplier);
+                    
+                    // Find most common classification for this supplier
+                    const supplierLabeled = Object.values(session.labeled)
+                        .filter(item => (item.supplier || "(unknown)") === currentSupplier);
+                    
+                    if (supplierLabeled.length > 0) {
+                        const classCounts = {};
+                        supplierLabeled.forEach(item => {
+                            const finalClass = item.final_class;
+                            if (finalClass) {
+                                classCounts[finalClass] = (classCounts[finalClass] || 0) + 1;
+                            }
+                        });
+                        
+                        if (Object.keys(classCounts).length > 0) {
+                            const mostCommonClass = Object.entries(classCounts)
+                                .sort(([,a], [,b]) => b - a)[0][0];
+                            
+                            // Only auto-select if it's different from LLM suggestion AND current pending reassign
+                            const llmSuggestion = current.suggested;
+                            if (mostCommonClass !== llmSuggestion && pendingReassign !== mostCommonClass) {
+                                setPendingReassign(mostCommonClass);
+                            } else {
+                                // Clear selection if most common matches LLM suggestion
+                                setPendingReassign(null);
+                            }
+                        }
+                    } else {
+                        // Clear selection for new suppliers with no history
+                        setPendingReassign(null);
+                    }
+                }
+            }, [current?.supplier, current?.suggested, groupBySupplier, session.labeled, lastSupplier]);
 
             // Similar items calculation
             const similar = useMemo(() => {
@@ -516,30 +588,35 @@
 
             // Separate effect to handle threshold changes without overriding manual selections
             useEffect(() => {
-                if (!current) return;
+                if (!current || similar.length === 0) return;
                 
-                setSelectedBatch(prev => {
-                    const newBatch = {};
-                    
-                    // Keep existing manual selections for available items
-                    const availableIds = new Set(similar.filter(s => !session.labeled[s.item.product_id]).map(s => s.item.product_id));
-                    
-                    for (const [id, selected] of Object.entries(prev)) {
-                        if (availableIds.has(id)) {
-                            newBatch[id] = selected; // Preserve manual choice
+                // Debounce this effect to prevent rapid updates when adjusting threshold
+                const timeoutId = setTimeout(() => {
+                    setSelectedBatch(prev => {
+                        const newBatch = {};
+                        
+                        // Keep existing manual selections for available items
+                        const availableIds = new Set(similar.filter(s => !session.labeled[s.item.product_id]).map(s => s.item.product_id));
+                        
+                        for (const [id, selected] of Object.entries(prev)) {
+                            if (availableIds.has(id)) {
+                                newBatch[id] = selected; // Preserve manual choice
+                            }
                         }
-                    }
-                    
-                    // Only auto-select items that weren't previously in the batch
-                    for (const s of similar) {
-                        const itemId = s.item.product_id;
-                        if (!session.labeled[itemId] && !(itemId in prev) && s.score >= similarityThreshold) {
-                            newBatch[itemId] = true;
+                        
+                        // Only auto-select items that weren't previously in the batch
+                        for (const s of similar) {
+                            const itemId = s.item.product_id;
+                            if (!session.labeled[itemId] && !(itemId in prev) && s.score >= similarityThreshold) {
+                                newBatch[itemId] = true;
+                            }
                         }
-                    }
-                    
-                    return newBatch;
-                });
+                        
+                        return newBatch;
+                    });
+                }, 100); // 100ms debounce
+                
+                return () => clearTimeout(timeoutId);
             }, [similarityThreshold, similar, session.labeled]);
 
             function labelAndNext(l) {
@@ -547,11 +624,6 @@
                     labeled: { ...prev.labeled, [l.product_id]: l } 
                 }));
                 setStreak((s) => s + 1);
-                
-                if ((completed + 1) % 5 === 0) {
-                    setShowConfetti(true);
-                    setTimeout(() => setShowConfetti(false), 2500);
-                }
                 
                 setPendingReassign(null);
                 // Stay at current index, the queue will automatically update and show next item
@@ -563,27 +635,45 @@
                     .filter(([, v]) => v)
                     .map(([k]) => k);
                     
+                console.log('Batch apply - selectedBatch:', selectedBatch);
+                console.log('Batch apply - selectedIds:', selectedIds);
+                console.log('Batch apply - current item:', current?.product_id);
+                
                 const dict = {};
                 if (current) dict[current.product_id] = makeLabel(current);
                 
                 for (const id of selectedIds) {
                     const it = items.find(x => x.product_id === id);
-                    if (it) dict[id] = makeLabel(it);
+                    if (it) {
+                        dict[id] = makeLabel(it);
+                        console.log('Processing item:', it.product_id, it.name);
+                    } else {
+                        console.warn('Could not find item with ID:', id);
+                    }
                 }
+                
+                console.log('Total items being processed:', Object.keys(dict).length);
+                
+                for (const id of selectedIds) {
+                    const it = items.find(x => x.product_id === id);
+                    if (it) {
+                        dict[id] = makeLabel(it);
+                        console.log('Processing item:', it.product_id, it.name);
+                    } else {
+                        console.warn('Could not find item with ID:', id);
+                    }
+                }
+                
+                console.log('Total items being processed:', Object.keys(dict).length);
                 
                 setSession((prev) => ({ 
                     labeled: { ...prev.labeled, ...dict } 
                 }));
                 setStreak((s) => s + 1 + selectedIds.length);
                 
-                if ((completed + 1 + selectedIds.length) % 5 === 0) {
-                    setShowConfetti(true);
-                    setTimeout(() => setShowConfetti(false), 2500);
-                }
-                
                 setPendingReassign(null);
                 setSelectedBatch({}); // Clear the selected batch
-                
+                setLastSupplier(null); // Reset supplier tracking
                 // Reset index to 0 to ensure we're at the start of the remaining queue
                 setIndex(0);
             }
@@ -598,33 +688,6 @@
                 }));
             }
 
-            function handleUnknown() {
-                if (!current) return;
-                batchApply((it) => ({
-                    ...it,
-                    decision: "unknown",
-                    final_class: "UNKNOWN",
-                    decided_at: new Date().toISOString(),
-                }));
-            }
-
-            function handleSkip() {
-                setStreak(0);
-                setIndex((i) => Math.min(i + 1, Math.max(queue.length - 1, 0)));
-            }
-
-            function handleBack() {
-                setStreak(0);
-                const lastId = Object.keys(session.labeled).pop();
-                if (!lastId) return;
-                
-                setSession((prev) => {
-                    const copy = { ...prev.labeled };
-                    delete copy[lastId];
-                    return { labeled: copy };
-                });
-            }
-
             function onReassignConfirm() {
                 if (!current || !pendingReassign) return;
                 const target = pendingReassign;
@@ -636,19 +699,176 @@
                 }));
             }
 
+            // Category descriptions embedded from construction_categories.csv
+            const CATEGORY_DESCRIPTIONS = {
+                "Aggregate": "Loose granular materials like gravel, sand, crushed stone for foundations, concrete, and drainage.",
+                "Asphalt": "Bitumen-based road surfacing and roofing materials.",
+                "Cladding": "External wall covering systems and panels for buildings.",
+                "Concrete": "Ready-mix concrete and site-mixed concrete supplies.",
+                "Electrical": "Cables, fittings, distribution boards, lighting, and electrical fixtures.",
+                "Finishes": "Materials used to finish surfaces (paint, coatings, sealants, flooring, tiles).",
+                "Fuels": "Fuel products such as diesel, petrol, heating oil, propane.",
+                "Furnishings": "Furniture and interior fit-out products (desks, seating, storage).",
+                "Insulation": "Thermal and acoustic insulation products (batts, boards, spray foam).",
+                "Bricks and Blocks": "Bricks, blocks, stone, mortar, and associated walling materials.",
+                "Mechanical": "HVAC and mechanical systems (ducting, fans, boilers, heat pumps).",
+                "Network Systems": "ICT infrastructure supplies (data cabling, networking hardware, telecoms).",
+                "Metals": "Metal stock materials (steel plate, sheet metal, sections not classified as structural).",
+                "Openings": "Doors, windows, frames, shutters, and related ironmongery.",
+                "Plasterboard": "Plasterboard, drywall boards, and accessories like jointing compounds.",
+                "Plumbing": "Pipes, fittings, valves, fixtures for water, waste, and heating systems.",
+                "Precast concrete": "Factory-made concrete components (panels, beams, manholes, blocks).",
+                "Rebar": "Reinforcing bars, mesh, and steel reinforcement accessories.",
+                "Structural Steel": "Structural steel beams, columns, frames, and related fabrication.",
+                "Timber": "Structural and joinery timber, sheet timber products (ply, OSB, MDF).",
+                "Aluminium": "Aluminium profiles, sheets, and architectural components.",
+                "Glass": "Glass sheets, glazing units, and specialist glass products.",
+                "Cement": "Bagged cement, additives, grout, and cementitious binders.",
+                "Earthworks": "Soils, subsoil, aggregates for fill, and materials for earthmoving.",
+                "Tools and Equipment": "Site tools, machinery, power tools, and plant hire.",
+                "Fasteners": "Fixings such as screws, bolts, anchors, nails, and brackets.",
+                "Other": "Items that do not clearly fall into any of the categories."
+            };
+
+            // Load category descriptions from construction_categories.csv
+            function loadCategories() {
+                fetch('./construction_categories.csv')
+                    .then(response => response.text())
+                    .then(csvText => {
+                        Papa.parse(csvText, {
+                            header: true,
+                            skipEmptyLines: true,
+                            complete: (res) => {
+                                const categoryMap = {};
+                                res.data.forEach(row => {
+                                    if (row.Category && row.Description) {
+                                        categoryMap[row.Category] = row.Description;
+                                    }
+                                });
+                                setCategories(categoryMap);
+                                console.log('Loaded category descriptions:', Object.keys(categoryMap).length);
+                            }
+                        });
+                    })
+                    .catch(err => {
+                        console.warn('Could not load category descriptions from CSV, using embedded data:', err);
+                        // Fallback to embedded descriptions
+                        setCategories(CATEGORY_DESCRIPTIONS);
+                    });
+            }
+
+            // Load categories on component mount
+            useEffect(() => {
+                loadCategories();
+            }, []);
+
+            // Debug: Log when categories change
+            useEffect(() => {
+                console.log('Categories updated:', categories);
+                console.log('Available categories:', Object.keys(categories));
+            }, [categories]);
+
+            // Keyboard shortcuts
+            useEffect(() => {
+                function handleKeyDown(e) {
+                    // Prevent shortcuts when typing in input fields or dropdowns
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+                    
+                    switch(e.key.toLowerCase()) {
+                        case 'a':
+                            e.preventDefault();
+                            handleAccept();
+                            break;
+                        case 'r':
+                            e.preventDefault();
+                            // Focus the reassign dropdown if it exists
+                            const reassignSelect = document.querySelector('select');
+                            if (reassignSelect) {
+                                reassignSelect.focus();
+                            }
+                            break;
+                        case 's':
+                            e.preventDefault();
+                            // Trigger reassign if a category is selected
+                            if (pendingReassign) {
+                                onReassignConfirm();
+                            }
+                            break;
+                    }
+                }
+                
+                document.addEventListener('keydown', handleKeyDown);
+                return () => document.removeEventListener('keydown', handleKeyDown);
+            }, [current, handleAccept, onReassignConfirm]);
+
+            // Open product search in new tab
+            function searchProductInfo() {
+                if (!current?.name) return;
+                
+                // Combine with AI-friendly prompt for better search results
+                const productInfo = current.supplier && current.supplier !== "" 
+                    ? `${current.supplier} ${current.name}`
+                    : current.name;
+                
+                const searchText = `what type of product is a ${productInfo}`;
+                const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchText)}`;
+                
+                window.open(searchUrl, '_blank');
+            }
+
+            // Open supplier search in new tab
+            function searchSupplierInfo() {
+                if (!current?.supplier || current.supplier === "") return;
+                
+                const searchText = `what does the supplier ${current.supplier} specialise in selling`;
+                const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchText)}`;
+                
+                window.open(searchUrl, '_blank');
+            }
+
             function handleUploadCSV(file) {
                 Papa.parse(file, {
                     header: true,
                     skipEmptyLines: true,
                     complete: (res) => {
-                        const rows = res.data.map((r) => ({
-                            product_id: String(r.product_id ?? r.id ?? Math.random().toString(36)),
+                        const rows = res.data.map((r, index) => ({
+                            product_id: String(r.product_id ?? r.id ?? `generated_${Date.now()}_${index}`),
                             supplier: String(r.supplier ?? r.vendor ?? ""),
                             name: String(r.name ?? r.title ?? ""),
                             suggested: r.suggested ? String(r.suggested) : undefined,
                             confidence: r.confidence ? Number(r.confidence) : undefined,
                         }));
-                        setItems(rows.filter((r) => r.name));
+                        
+                        // Filter out rows with invalid data and ensure unique IDs
+                        const validRows = rows.filter((r) => r.name && r.name !== "" && r.name !== "#REF!");
+                        
+                        // Check for duplicate product_ids and make them unique
+                        const seenIds = new Set();
+                        const uniqueRows = validRows.map((row, index) => {
+                            let id = row.product_id;
+                            
+                            // Handle common Excel error values and invalid IDs
+                            if (id === "#REF!" || id === "#N/A" || id === "#VALUE!" || id === "#DIV/0!" || id === "" || id === "undefined" || id === "null") {
+                                id = `cleaned_${Date.now()}_${index}`;
+                            }
+                            
+                            // Ensure uniqueness
+                            let finalId = id;
+                            let counter = 1;
+                            while (seenIds.has(finalId)) {
+                                finalId = `${id}_${counter}`;
+                                counter++;
+                            }
+                            seenIds.add(finalId);
+                            
+                            return {
+                                ...row,
+                                product_id: finalId
+                            };
+                        });
+                        
+                        console.log(`Loaded ${uniqueRows.length} valid items (filtered out ${rows.length - uniqueRows.length} invalid items)`);
+                        setItems(uniqueRows);
                         setIndex(0);
                     },
                 });
@@ -673,35 +893,18 @@
                     setStreak(0);
                     setPendingReassign(null);
                     setSelectedBatch({});
+                    setLastSupplier(null);
                     localStorage.removeItem(STORAGE_KEY);
                 }
             }
 
             return (
                 <div className="min-h-screen" style={{background: "linear-gradient(to bottom, #f8fafc, white)", padding: "24px"}}>
-                    {showConfetti && (
-                        <div className="confetti">
-                            <div style={{
-                                position: "absolute",
-                                top: "50%",
-                                left: "50%",
-                                transform: "translate(-50%, -50%)",
-                                fontSize: "48px",
-                                color: "#3b82f6",
-                                fontWeight: "bold"
-                            }}>
-                                🎉 Great job! 🎉
-                            </div>
-                        </div>
-                    )}
                     
                     <div style={{maxWidth: "1200px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "24px"}}>
                         <header style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
                             <div>
                                 <h1 style={{fontSize: "32px", fontWeight: "bold", margin: 0}}>Product Group Reviewer</h1>
-                                <p style={{color: "#64748b", margin: "8px 0 0 0"}}>
-                                    Browser-compatible build with <strong>Similar Items</strong> batch functionality.
-                                </p>
                             </div>
                             <div style={{display: "flex", alignItems: "center", gap: "8px"}}>
                                 <Badge>Streak: {streak}</Badge>
@@ -724,9 +927,11 @@
                                             <span>{progress}% complete</span>
                                         </div>
                                     </div>
-                                    <div style={{display: "flex", alignItems: "center", gap: "8px"}}>
-                                        <Switch checked={orderByLowConf} onCheckedChange={setOrderByLowConf} />
-                                        <span style={{fontSize: "14px", color: "#374151"}}>Lowest confidence first</span>
+                                    <div style={{display: "flex", flexDirection: "column", gap: "8px"}}>
+                                        <div style={{display: "flex", alignItems: "center", gap: "8px"}}>
+                                            <Switch checked={groupBySupplier} onCheckedChange={setGroupBySupplier} />
+                                            <span style={{fontSize: "14px", color: "#374151"}}>Group by supplier</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -749,15 +954,108 @@
 
                         <Card>
                             {current ? (
-                                <div style={{display: "grid", gridTemplateColumns: "2fr 1fr", gap: "24px"}}>
-                                    {/* Main detail */}
-                                    <div style={{display: "flex", flexDirection: "column", gap: "16px"}}>
-                                        <div>
+                                <div>
+                                    {/* Supplier context indicator when grouping by supplier */}
+                                    {groupBySupplier && (
+                                        <div style={{
+                                            background: "#f8fafc", 
+                                            border: "1px solid #e2e8f0", 
+                                            borderRadius: "6px", 
+                                            padding: "12px", 
+                                            marginBottom: "16px",
+                                            fontSize: "14px",
+                                            color: "#475569"
+                                        }}>
+                                            {(() => {
+                                                const currentSupplier = current.supplier || "(unknown)";
+                                                const supplierProducts = queue.filter(p => (p.supplier || "(unknown)") === currentSupplier);
+                                                const currentIndex = queue.indexOf(current);
+                                                const supplierIndex = supplierProducts.indexOf(current) + 1;
+                                                
+                                                // Find most common classification for this supplier
+                                                const supplierLabeled = Object.values(session.labeled)
+                                                    .filter(item => (item.supplier || "(unknown)") === currentSupplier);
+                                                
+                                                let mostCommonClass = null;
+                                                if (supplierLabeled.length > 0) {
+                                                    const classCounts = {};
+                                                    supplierLabeled.forEach(item => {
+                                                        const finalClass = item.final_class;
+                                                        if (finalClass) {
+                                                            classCounts[finalClass] = (classCounts[finalClass] || 0) + 1;
+                                                        }
+                                                    });
+                                                    
+                                                    if (Object.keys(classCounts).length > 0) {
+                                                        mostCommonClass = Object.entries(classCounts)
+                                                            .sort(([,a], [,b]) => b - a)[0];
+                                                    }
+                                                }
+                                                
+                                                return (
+                                                    <div style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
+                                                        <span>
+                                                            📦 <strong>{currentSupplier}</strong> 
+                                                            <span style={{color: "#64748b", marginLeft: "8px"}}>
+                                                                ({supplierIndex}/{supplierProducts.length} products)
+                                                            </span>
+                                                            {mostCommonClass && (
+                                                                <span style={{
+                                                                    marginLeft: "12px",
+                                                                    fontSize: "12px",
+                                                                    background: "#e0f2fe",
+                                                                    color: "#0c4a6e",
+                                                                    padding: "2px 6px",
+                                                                    borderRadius: "4px",
+                                                                    fontWeight: "500"
+                                                                }}>
+                                                                    Most used: {mostCommonClass[0]} ({mostCommonClass[1]}x)
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                        <span style={{color: "#64748b", fontSize: "12px"}}>
+                                                            Queue: {currentIndex + 1}/{queue.length}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+                                    
+                                    <div style={{display: "grid", gridTemplateColumns: "2fr 1fr", gap: "24px"}}>
+                                        {/* Main detail */}
+                                        <div style={{display: "flex", flexDirection: "column", gap: "16px"}}>
+                                            <div>
                                             <div style={{fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#64748b"}}>
                                                 Supplier
                                             </div>
-                                            <div style={{fontSize: "18px", fontWeight: "500", marginTop: "4px"}}>
-                                                {current.supplier || <em style={{color: "#94a3b8"}}>(unknown)</em>}
+                                            <div style={{fontSize: "18px", fontWeight: "500", marginTop: "4px", display: "flex", alignItems: "center", gap: "8px"}}>
+                                                <span>{current.supplier || <em style={{color: "#94a3b8"}}>(unknown)</em>}</span>
+                                                {current.supplier && current.supplier !== "" && (
+                                                    <button 
+                                                        onClick={searchSupplierInfo} 
+                                                        className="copy-supplier-btn text-slate-500 hover:text-slate-700 transition-colors p-1 rounded"
+                                                        style={{
+                                                            background: "none",
+                                                            border: "none",
+                                                            cursor: "pointer",
+                                                            fontSize: "14px",
+                                                            padding: "2px 4px",
+                                                            borderRadius: "4px"
+                                                        }}
+                                                        onMouseOver={(e) => {
+                                                            e.target.style.background = "#f1f5f9";
+                                                            e.target.style.color = "#334155";
+                                                        }}
+                                                        onMouseOut={(e) => {
+                                                            e.target.style.background = "none";
+                                                            e.target.style.color = "#64748b";
+                                                        }}
+                                                        title="Search supplier specialisation"
+                                                    >
+                                                        �
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                         
@@ -765,8 +1063,37 @@
                                             <div style={{fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#64748b"}}>
                                                 Product Name
                                             </div>
-                                            <div style={{fontSize: "20px", fontWeight: "600", lineHeight: "1.3", marginTop: "4px"}}>
-                                                {current.name}
+                                            <div style={{display: "flex", alignItems: "center", gap: "8px", marginTop: "4px"}}>
+                                                <div style={{fontSize: "20px", fontWeight: "600", lineHeight: "1.3", flex: 1}}>
+                                                    {current.name}
+                                                </div>
+                                                <button 
+                                                    className="copy-btn"
+                                                    onClick={searchProductInfo}
+                                                    style={{
+                                                        background: "none",
+                                                        border: "1px solid #e5e7eb",
+                                                        borderRadius: "4px",
+                                                        padding: "4px 6px",
+                                                        cursor: "pointer",
+                                                        color: "#64748b",
+                                                        fontSize: "12px",
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        transition: "all 0.2s"
+                                                    }}
+                                                    onMouseOver={(e) => {
+                                                        e.target.style.background = "#f9fafb";
+                                                        e.target.style.color = "#374151";
+                                                    }}
+                                                    onMouseOut={(e) => {
+                                                        e.target.style.background = "none";
+                                                        e.target.style.color = "#64748b";
+                                                    }}
+                                                    title="Search product information"
+                                                >
+                                                    �
+                                                </button>
                                             </div>
                                         </div>
                                         
@@ -784,8 +1111,30 @@
                                             </div>
                                         </div>
 
+                                        {/* Category Description */}
+                                        {current.suggested && categories[current.suggested] && (
+                                            <div style={{
+                                                backgroundColor: "#f8fafc", 
+                                                border: "1px solid #e2e8f0", 
+                                                borderRadius: "8px", 
+                                                padding: "12px",
+                                                marginTop: "12px"
+                                            }}>
+                                                <div style={{fontSize: "13px", color: "#475569", lineHeight: "1.4"}}>
+                                                    {categories[current.suggested]}
+                                                </div>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Debug info - remove this later */}
+                                        {current.suggested && !categories[current.suggested] && (
+                                            <div style={{fontSize: "11px", color: "#ef4444", marginTop: "8px"}}>
+                                                Debug: No description found for "{current.suggested}". Available: {Object.keys(categories).join(', ')}
+                                            </div>
+                                        )}
+
                                         {/* Actions */}
-                                        <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "8px"}}>
+                                        <div style={{display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px", marginTop: "8px"}}>
                                             <Button variant="success" onClick={handleAccept}>
                                                 ✓ Accept (A)
                                             </Button>
@@ -805,23 +1154,28 @@
                                                     onClick={onReassignConfirm} 
                                                     disabled={!pendingReassign}
                                                 >
-                                                    Reassign
-                                                </Button>
-                                            </div>
-
-                                            <Button variant="outline" onClick={handleUnknown}>
-                                                ❓ Unknown (U)
-                                            </Button>
-
-                                            <div style={{display: "flex", gap: "8px"}}>
-                                                <Button variant="outline" onClick={handleSkip}>
-                                                    ⏭️ Skip (S)
-                                                </Button>
-                                                <Button variant="outline" onClick={handleBack}>
-                                                    ↶ Back (B)
+                                                    Reassign (S)
                                                 </Button>
                                             </div>
                                         </div>
+
+                                        {/* Reassign Category Description */}
+                                        {pendingReassign && categories[pendingReassign] && (
+                                            <div style={{
+                                                backgroundColor: "#eff6ff", 
+                                                border: "1px solid #3b82f6", 
+                                                borderRadius: "8px", 
+                                                padding: "12px",
+                                                marginTop: "12px"
+                                            }}>
+                                                <div style={{fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#1e40af", marginBottom: "4px", fontWeight: "600"}}>
+                                                    {pendingReassign} Description
+                                                </div>
+                                                <div style={{fontSize: "13px", color: "#1e40af", lineHeight: "1.4"}}>
+                                                    {categories[pendingReassign]}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Similar items sidebar */}
@@ -907,12 +1261,22 @@
                                                     Batch Action Preview
                                                 </div>
                                                 <div style={{fontSize: "11px", color: "#075985", marginTop: "2px"}}>
-                                                    {1 + Object.values(selectedBatch).filter(Boolean).length} items will be processed together
+                                                    {(() => {
+                                                        const selectedCount = Object.values(selectedBatch).filter(Boolean).length;
+                                                        const visibleSelectedCount = Object.entries(selectedBatch)
+                                                            .filter(([id, selected]) => selected && similar.some(s => s.item.product_id === id))
+                                                            .length;
+                                                        const hiddenCount = selectedCount - visibleSelectedCount;
+                                                        
+                                                        return `${1 + selectedCount} items will be processed together` + 
+                                                               (hiddenCount > 0 ? ` (${hiddenCount} hidden by threshold)` : '');
+                                                    })()}
                                                 </div>
                                             </div>
                                         )}
                                     </div>
                                 </div>
+                            </div>
                             ) : (
                                 <div style={{textAlign: "center", padding: "48px"}}>
                                     <h2 style={{fontSize: "24px", fontWeight: "600", marginBottom: "8px"}}>
@@ -938,7 +1302,8 @@
         }
 
         // Render the app
-        ReactDOM.render(<ProductGroupReviewer />, document.getElementById('root'));
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<ProductGroupReviewer />);
     </script>
 </body>
 </html>

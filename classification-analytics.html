@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Classification Analytics</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABWklEQVR4AZSPsauBURjGf/feuossIgPZLQbJJFnEZrOapCzKqmz8D0aJMiiTlMnCIAwii5XEZuCK3HM6Pq5OudT7vOf5zvs+v77zeYG80I/Q5U3JTP4TyAl9C71bMpOTAGn0sM0GwaCS3a7P1c23BChrdJcLGg1YraDbVVouodkEq9XYup2PgK8vqNVgOIRwGCwWcLuh3YZYDCqVW9Awj4DzGQIBKJWgWgWzGeZzyGTUfiQCJpPy1/4IuF6SzYJ892ajbiRYutMJDC+/hXTAxwckErBYwH4vVkTF46KJajbhcBDmXjrA5wOHAwYDSCah1YJiEUYjSKfvyavTAaGQGo3H0OtBvQ7RKPj9sN2q2Z+uA7xeNV6vYTqFchk6He3tagl0gNOpZrudOv/pOsAIyD8w/JNTB6RS4PFAv/8kdh9JwPH+KdxsBpOJMC/VUQIKYvURIi5eKJkp/AIAAP//GbHGGAAAAAZJREFUAwBtEXLzW3c1JQAAAABJRU5ErkJggg==">
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/papaparse@5/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        function ClassificationAnalytics() {
+            const [files, setFiles] = useState([]);
+            const [analysisData, setAnalysisData] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [regexConfidenceThreshold, setRegexConfidenceThreshold] = useState(0.8); // Default 80%
+            const agreementChartRef = useRef(null);
+            const categoryChartRef = useRef(null);
+            const categoryPercentageChartRef = useRef(null);
+            const confidenceDistributionChartRef = useRef(null);
+            const categoryMigrationChartRef = useRef(null);
+
+            // Parse uploaded CSV files
+            const handleFileUpload = async (event) => {
+                const uploadedFiles = Array.from(event.target.files);
+                if (uploadedFiles.length === 0) return;
+
+                setLoading(true);
+                setError('');
+                console.log(`Processing ${uploadedFiles.length} new files...`);
+
+                try {
+                    const parsedFiles = [];
+                    
+                    // Process files one by one to avoid Promise.all issues
+                    for (let i = 0; i < uploadedFiles.length; i++) {
+                        const file = uploadedFiles[i];
+                        
+                        // Check if this file is already uploaded
+                        if (files.some(existingFile => existingFile.name === file.name)) {
+                            console.log(`Skipping duplicate file: ${file.name}`);
+                            continue;
+                        }
+                        
+                        console.log(`Parsing file ${i + 1}: ${file.name}`);
+                        
+                        const parsedFile = await new Promise((resolve, reject) => {
+                            Papa.parse(file, {
+                                header: true,
+                                skipEmptyLines: true,
+                                dynamicTyping: false, // Keep everything as strings
+                                complete: (results) => {
+                                    console.log(`File ${file.name} parsed:`, {
+                                        rows: results.data.length,
+                                        errors: results.errors.length,
+                                        columns: results.meta.fields
+                                    });
+                                    
+                                    if (results.errors.length > 0) {
+                                        console.warn(`Warnings in ${file.name}:`, results.errors);
+                                        // Only reject on fatal errors, not warnings
+                                        const fatalErrors = results.errors.filter(error => error.type === 'Delimiter');
+                                        if (fatalErrors.length > 0) {
+                                            reject(new Error(`Fatal error parsing ${file.name}: ${fatalErrors[0].message}`));
+                                            return;
+                                        }
+                                    }
+                                    
+                                    // Filter out empty rows
+                                    const validData = results.data.filter(row => 
+                                        row && (row.name || row.supplier || row.final_class || row.category)
+                                    );
+                                    
+                                    resolve({
+                                        name: file.name,
+                                        reviewer: file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " "), // Clean filename
+                                        data: validData
+                                    });
+                                },
+                                error: (error) => {
+                                    console.error(`Error parsing ${file.name}:`, error);
+                                    reject(new Error(`Error parsing ${file.name}: ${error.message}`));
+                                }
+                            });
+                        });
+                        
+                        parsedFiles.push(parsedFile);
+                    }
+
+                    // Add new files to existing files
+                    const allFiles = [...files, ...parsedFiles];
+                    console.log('All files after upload:', allFiles.map(f => ({ name: f.name, rows: f.data.length })));
+                    
+                    setFiles(allFiles);
+                    
+                    // Only analyze if we have at least 2 files
+                    if (allFiles.length >= 2) {
+                        analyzeClassifications(allFiles);
+                    } else if (allFiles.length === 1) {
+                        setError('Upload at least one more file to start comparison analysis');
+                        setAnalysisData(null);
+                    }
+                    
+                    // Clear the file input to allow re-uploading the same file if needed
+                    event.target.value = '';
+                    
+                } catch (err) {
+                    console.error('File processing error:', err);
+                    setError(`File processing failed: ${err.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // Clear all uploaded files
+            const clearAllFiles = () => {
+                setFiles([]);
+                setAnalysisData(null);
+                setError('');
+                console.log('All files cleared');
+            };
+
+            // Analyze high-confidence patterns for regex suggestions
+            const analyzeHighConfidencePatterns = (fileData, threshold = 0.8) => {
+                console.log('analyzeHighConfidencePatterns called with:', { fileData, threshold });
+                
+                if (!fileData || !Array.isArray(fileData)) {
+                    console.warn('Invalid fileData passed to analyzeHighConfidencePatterns:', fileData);
+                    return {};
+                }
+                
+                const categoryPatterns = {};
+                const minConfidence = threshold; // Use passed threshold parameter
+                const minOccurrences = 3; // Word must appear at least 3 times
+
+                fileData.forEach(file => {
+                    if (!file || !file.data || !Array.isArray(file.data)) {
+                        console.warn('Invalid file structure:', file);
+                        return;
+                    }
+                    
+                    file.data.forEach(row => {
+                        const confidence = parseFloat(row.confidence) || 0;
+                        const category = (row.final_class || row.category || '').trim();
+                        const productName = (row.name || '').trim().toLowerCase();
+                        
+                        // Only analyze high-confidence classifications, excluding 'Other' category
+                        if (confidence >= minConfidence && category && productName && category.toLowerCase() !== 'other') {
+                            if (!categoryPatterns[category]) {
+                                categoryPatterns[category] = {};
+                            }
+                            
+                            // Extract meaningful words (2+ characters, not common stop words)
+                            const words = productName
+                                .replace(/[^\w\s]/g, ' ') // Remove special chars
+                                .split(/\s+/)
+                                .filter(word => word.length >= 2)
+                                .filter(word => !['the', 'and', 'for', 'with', 'from', 'ltd', 'inc', 'co'].includes(word));
+                            
+                            words.forEach(word => {
+                                if (!categoryPatterns[category][word]) {
+                                    categoryPatterns[category][word] = {
+                                        count: 0,
+                                        avgConfidence: 0,
+                                        confidenceSum: 0,
+                                        examples: []
+                                    };
+                                }
+                                
+                                const pattern = categoryPatterns[category][word];
+                                pattern.count++;
+                                pattern.confidenceSum += confidence;
+                                pattern.avgConfidence = pattern.confidenceSum / pattern.count;
+                                
+                                if (pattern.examples.length < 3) {
+                                    pattern.examples.push(productName);
+                                }
+                            });
+                        }
+                    });
+                });
+
+                // Filter and rank patterns
+                const filteredPatterns = {};
+                Object.entries(categoryPatterns).forEach(([category, words]) => {
+                    const significantWords = Object.entries(words)
+                        .filter(([word, data]) => data.count >= minOccurrences)
+                        .sort(([,a], [,b]) => (b.count * b.avgConfidence) - (a.count * a.avgConfidence))
+                        .slice(0, 10); // Top 10 words per category
+                    
+                    if (significantWords.length > 0) {
+                        filteredPatterns[category] = significantWords.map(([word, data]) => ({
+                            word,
+                            count: data.count,
+                            avgConfidence: data.avgConfidence,
+                            score: data.count * data.avgConfidence,
+                            examples: data.examples,
+                            suggestedRegex: `\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`
+                        }));
+                    }
+                });
+
+                return filteredPatterns;
+            };
+
+            // Analyze confidence score distribution by category
+            const analyzeConfidenceDistribution = (products) => {
+                const categoryConfidence = {};
+                
+                products.forEach(product => {
+                    Object.entries(product.classifications).forEach(([reviewer, classification]) => {
+                        if (classification && classification.category && classification.confidence) {
+                            const category = classification.category;
+                            const confidence = parseFloat(classification.confidence);
+                            
+                            if (!categoryConfidence[category]) {
+                                categoryConfidence[category] = {
+                                    scores: [],
+                                    average: 0,
+                                    min: 1,
+                                    max: 0,
+                                    count: 0
+                                };
+                            }
+                            
+                            categoryConfidence[category].scores.push(confidence);
+                            categoryConfidence[category].count++;
+                            categoryConfidence[category].min = Math.min(categoryConfidence[category].min, confidence);
+                            categoryConfidence[category].max = Math.max(categoryConfidence[category].max, confidence);
+                        }
+                    });
+                });
+                
+                // Calculate averages
+                Object.keys(categoryConfidence).forEach(category => {
+                    const data = categoryConfidence[category];
+                    data.average = data.scores.reduce((sum, score) => sum + score, 0) / data.scores.length;
+                });
+                
+                return categoryConfidence;
+            };
+
+            // Analyze category migration patterns in disagreements
+            const analyzeCategoryMigration = (disagreements) => {
+                const migrations = {};
+                
+                disagreements.forEach(disagreement => {
+                    // Extract categories from the disagreement object
+                    const category1 = disagreement.category1;
+                    const category2 = disagreement.category2;
+                    
+                    if (category1 && category2 && category1.trim() && category2.trim()) {
+                        // Create bidirectional migration tracking
+                        const migrationKey1 = `${category1} → ${category2}`;
+                        const migrationKey2 = `${category2} → ${category1}`;
+                        
+                        // Only count unique migration patterns (avoid duplicates)
+                        [migrationKey1, migrationKey2].forEach(migrationKey => {
+                            if (!migrations[migrationKey]) {
+                                migrations[migrationKey] = {
+                                    from: migrationKey.split(' → ')[0],
+                                    to: migrationKey.split(' → ')[1],
+                                    count: 0,
+                                    examples: []
+                                };
+                            }
+                            
+                            migrations[migrationKey].count++;
+                            if (migrations[migrationKey].examples.length < 3) {
+                                migrations[migrationKey].examples.push({
+                                    product: disagreement.product,
+                                    reviewer1: disagreement.reviewer1,
+                                    reviewer2: disagreement.reviewer2
+                                });
+                            }
+                        });
+                    }
+                });
+                
+                return migrations;
+            };
+
+            // Analyze products with consistently low confidence scores
+            const analyzeLowConfidenceProducts = (products) => {
+                const lowConfidenceThreshold = 0.6;
+                const lowConfidenceProducts = [];
+                
+                products.forEach(product => {
+                    const confidenceScores = Object.values(product.classifications)
+                        .map(classification => parseFloat(classification.confidence) || 0)
+                        .filter(score => score > 0);
+                    
+                    if (confidenceScores.length >= 2) { // Need at least 2 reviewers
+                        const avgConfidence = confidenceScores.reduce((sum, score) => sum + score, 0) / confidenceScores.length;
+                        const maxConfidence = Math.max(...confidenceScores);
+                        
+                        // Flag if average confidence is low OR even the highest confidence is low
+                        if (avgConfidence < lowConfidenceThreshold || maxConfidence < lowConfidenceThreshold + 0.1) {
+                            lowConfidenceProducts.push({
+                                product: product.name,
+                                supplier: product.supplier,
+                                avgConfidence: avgConfidence,
+                                maxConfidence: maxConfidence,
+                                reviewerCount: confidenceScores.length,
+                                categories: Object.values(product.classifications).map(c => c.category).filter(Boolean)
+                            });
+                        }
+                    }
+                });
+                
+                // Sort by lowest average confidence first
+                return lowConfidenceProducts.sort((a, b) => a.avgConfidence - b.avgConfidence);
+            };
+
+            // Analyze classification differences
+            const analyzeClassifications = (fileData) => {
+                try {
+                    if (fileData.length < 2) {
+                        console.warn('Need at least 2 files for comparison');
+                        return;
+                    }
+
+                    console.log('Starting analysis with files:', fileData.map(f => f.name));
+
+                    // Create a map of all products across all files
+                    const productMap = new Map();
+                    
+                    fileData.forEach((file, fileIndex) => {
+                        console.log(`Processing file ${file.name} with ${file.data.length} rows`);
+                        
+                        if (!file.data || !Array.isArray(file.data)) {
+                            console.error(`File ${file.name} has invalid data:`, file.data);
+                            return;
+                        }
+                        
+                        file.data.forEach((row, rowIndex) => {
+                            try {
+                                // Skip rows without essential data
+                                if (!row || !row.name || row.name.trim() === '') {
+                                    return;
+                                }
+                                
+                                const productKey = `${(row.supplier || '').trim()}_${(row.name || '').trim()}`.toLowerCase();
+                                
+                                if (!productMap.has(productKey)) {
+                                    productMap.set(productKey, {
+                                        supplier: (row.supplier || '').trim(),
+                                        name: (row.name || '').trim(),
+                                        classifications: {}
+                                    });
+                                }
+                                
+                                const product = productMap.get(productKey);
+                                
+                                // Handle different CSV formats flexibly
+                                const finalCategory = row.final_class || row.category || '';
+                                const decisionSource = row.decision || row.source || 'actual';
+                                const originalSugg = row.suggested || row.originalSuggestion || '';
+                                
+                                product.classifications[file.reviewer] = {
+                                    category: finalCategory.toString().trim(),
+                                    source: (decisionSource === 'reassign') ? 'reassigned' : 'actual',
+                                    originalSuggestion: originalSugg.toString().trim(),
+                                    confidence: parseFloat(row.confidence) || 0,
+                                    productId: row.product_id || '',
+                                    decidedAt: row.decided_at || ''
+                                };
+                            } catch (rowError) {
+                                console.error(`Error processing row ${rowIndex + 1} in ${file.name}:`, rowError, row);
+                            }
+                        });
+                    });
+
+                    console.log(`Total unique products found: ${productMap.size}`);
+
+                    // Calculate agreement statistics
+                    const products = Array.from(productMap.values());
+                    const reviewers = fileData.map(f => f.reviewer);
+                    
+                    console.log('Reviewers:', reviewers);
+                    
+                    // Filter products that appear in multiple files
+                    const commonProducts = products.filter(product => {
+                        const reviewerCount = reviewers.filter(reviewer => 
+                            product.classifications[reviewer] && 
+                            product.classifications[reviewer].category
+                        ).length;
+                        return reviewerCount >= 2;
+                    });
+
+                    console.log(`Products with multiple classifications: ${commonProducts.length}`);
+
+                    if (commonProducts.length === 0) {
+                        setError('No common products found between files. Please check that the files contain the same products with matching supplier and product names.');
+                        return;
+                    }
+
+                    // Calculate inter-rater agreement
+                    const agreements = [];
+                    const disagreements = [];
+                    const categoryStats = {};
+                    const reviewerStats = {};
+
+                    // Initialize reviewer stats
+                    reviewers.forEach(reviewer => {
+                        reviewerStats[reviewer] = {
+                            total: 0,
+                            reassigned: 0,
+                            agreements: 0,
+                            disagreements: 0
+                        };
+                    });
+
+                    commonProducts.forEach((product, productIndex) => {
+                        try {
+                            const productReviewers = reviewers.filter(r => 
+                                product.classifications[r] && 
+                                product.classifications[r].category
+                            );
+                            
+                            if (productReviewers.length >= 2) {
+                                // Compare all pairs of reviewers for this product
+                                for (let i = 0; i < productReviewers.length; i++) {
+                                    for (let j = i + 1; j < productReviewers.length; j++) {
+                                        const reviewer1 = productReviewers[i];
+                                        const reviewer2 = productReviewers[j];
+                                        
+                                        const class1 = product.classifications[reviewer1];
+                                        const class2 = product.classifications[reviewer2];
+                                        
+                                        if (!class1 || !class2) {
+                                            console.warn(`Missing classification for product ${product.name}`);
+                                            continue;
+                                        }
+                                        
+                                        const agree = class1.category.toLowerCase() === class2.category.toLowerCase();
+                                        
+                                        const comparison = {
+                                            product: `${product.supplier} ${product.name}`.trim(),
+                                            reviewer1,
+                                            reviewer2,
+                                            category1: class1.category,
+                                            category2: class2.category,
+                                            source1: class1.source,
+                                            source2: class2.source,
+                                            agree
+                                        };
+
+                                        if (agree) {
+                                            agreements.push(comparison);
+                                            reviewerStats[reviewer1].agreements++;
+                                            reviewerStats[reviewer2].agreements++;
+                                        } else {
+                                            disagreements.push(comparison);
+                                            reviewerStats[reviewer1].disagreements++;
+                                            reviewerStats[reviewer2].disagreements++;
+                                        }
+
+                                        // Update category stats
+                                        [class1.category, class2.category].forEach(cat => {
+                                            if (cat && cat.trim()) {
+                                                if (!categoryStats[cat]) {
+                                                    categoryStats[cat] = { agreements: 0, disagreements: 0 };
+                                                }
+                                                categoryStats[cat][agree ? 'agreements' : 'disagreements']++;
+                                            }
+                                        });
+
+                                        // Update reviewer stats
+                                        reviewerStats[reviewer1].total++;
+                                        reviewerStats[reviewer2].total++;
+                                        
+                                        if (class1.source === 'reassigned') reviewerStats[reviewer1].reassigned++;
+                                        if (class2.source === 'reassigned') reviewerStats[reviewer2].reassigned++;
+                                    }
+                                }
+                            }
+                        } catch (productError) {
+                            console.error(`Error processing product ${productIndex}:`, productError, product);
+                        }
+                    });
+
+                    // Calculate percentages
+                    const totalComparisons = agreements.length + disagreements.length;
+                    const agreementRate = totalComparisons > 0 ? (agreements.length / totalComparisons * 100) : 0;
+
+                    // Analyze high-confidence patterns for regex suggestions
+                    const regexPatterns = analyzeHighConfidencePatterns(fileData, regexConfidenceThreshold);
+
+                    // Additional analyses for new features
+                    const confidenceDistribution = analyzeConfidenceDistribution(commonProducts);
+                    const categoryMigration = analyzeCategoryMigration(disagreements);
+                    const lowConfidenceAlerts = analyzeLowConfidenceProducts(commonProducts);
+
+                    console.log('Analysis complete:', {
+                        totalProducts: commonProducts.length,
+                        totalComparisons,
+                        agreementRate,
+                        agreements: agreements.length,
+                        disagreements: disagreements.length,
+                        regexPatterns: Object.keys(regexPatterns).length,
+                        confidenceDistribution: Object.keys(confidenceDistribution).length,
+                        categoryMigration: Object.keys(categoryMigration).length,
+                        lowConfidenceAlerts: lowConfidenceAlerts.length
+                    });
+
+                    setAnalysisData({
+                        totalProducts: commonProducts.length,
+                        totalComparisons,
+                        agreementRate,
+                        agreements,
+                        disagreements,
+                        categoryStats,
+                        reviewerStats,
+                        regexPatterns,
+                        reviewers,
+                        confidenceDistribution,
+                        categoryMigration,
+                        lowConfidenceAlerts
+                    });
+
+                } catch (error) {
+                    console.error('Analysis failed:', error);
+                    setError(`Analysis failed: ${error.message}. Check the console for details.`);
+                }
+            };
+
+            // Create charts when analysis data changes
+            useEffect(() => {
+                if (analysisData && analysisData.reviewers.length > 0) {
+                    // Destroy existing charts first
+                    [agreementChartRef, categoryChartRef, categoryPercentageChartRef, confidenceDistributionChartRef, categoryMigrationChartRef].forEach(ref => {
+                        if (ref.current && ref.current.chartInstance) {
+                            ref.current.chartInstance.destroy();
+                        }
+                    });
+                    
+                    createCharts();
+                }
+            }, [analysisData]);
+
+            // Recalculate regex patterns when threshold changes
+            const currentRegexPatterns = useMemo(() => {
+                if (files.length > 0) {
+                    console.log('Computing regex patterns with threshold:', regexConfidenceThreshold);
+                    console.log('Files structure:', files.map(f => ({ name: f.name, dataLength: f.data?.length })));
+                    const patterns = analyzeHighConfidencePatterns(files, regexConfidenceThreshold);
+                    console.log('Computed regex patterns:', Object.keys(patterns).length, patterns);
+                    return patterns;
+                }
+                console.log('No files available, returning empty patterns');
+                return {};
+            }, [regexConfidenceThreshold, files]);
+
+            const createCharts = () => {
+                try {
+                    // Agreement Rate Chart
+                    if (agreementChartRef.current) {
+                        const ctx = agreementChartRef.current.getContext('2d');
+                        agreementChartRef.current.chartInstance = new Chart(ctx, {
+                            type: 'doughnut',
+                            data: {
+                                labels: ['Agreements', 'Disagreements'],
+                                datasets: [{
+                                    data: [analysisData.agreements.length, analysisData.disagreements.length],
+                                    backgroundColor: ['#10b981', '#ef4444'],
+                                    borderWidth: 0
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    title: {
+                                        display: true,
+                                        text: `Overall Agreement Rate: ${analysisData.agreementRate.toFixed(1)}%`
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Category Disagreement Chart
+                    if (categoryChartRef.current && Object.keys(analysisData.categoryStats).length > 0) {
+                        const categoryLabels = Object.keys(analysisData.categoryStats).slice(0, 10);
+                        const categoryDisagreements = categoryLabels.map(cat => 
+                            analysisData.categoryStats[cat].disagreements
+                        );
+
+                        const ctx = categoryChartRef.current.getContext('2d');
+                        categoryChartRef.current.chartInstance = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: categoryLabels,
+                                datasets: [{
+                                    label: 'Disagreements',
+                                    data: categoryDisagreements,
+                                    backgroundColor: '#f59e0b',
+                                    borderColor: '#d97706',
+                                    borderWidth: 1
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    title: {
+                                        display: true,
+                                        text: 'Disagreements by Category (Count)'
+                                    }
+                                },
+                                scales: {
+                                    x: {
+                                        ticks: {
+                                            maxRotation: 45
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Category Percentage Breakdown Chart
+                    if (categoryPercentageChartRef.current && Object.keys(analysisData.categoryStats).length > 0) {
+                        const categoryLabels = Object.keys(analysisData.categoryStats).slice(0, 10);
+                        const agreementPercentages = [];
+                        const disagreementPercentages = [];
+                        
+                        categoryLabels.forEach(cat => {
+                            const total = analysisData.categoryStats[cat].agreements + analysisData.categoryStats[cat].disagreements;
+                            if (total > 0) {
+                                agreementPercentages.push((analysisData.categoryStats[cat].agreements / total * 100).toFixed(1));
+                                disagreementPercentages.push((analysisData.categoryStats[cat].disagreements / total * 100).toFixed(1));
+                            } else {
+                                agreementPercentages.push(0);
+                                disagreementPercentages.push(0);
+                            }
+                        });
+
+                        const ctx = categoryPercentageChartRef.current.getContext('2d');
+                        categoryPercentageChartRef.current.chartInstance = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: categoryLabels,
+                                datasets: [
+                                    {
+                                        label: 'Agreement %',
+                                        data: agreementPercentages,
+                                        backgroundColor: '#10b981',
+                                        borderColor: '#059669',
+                                        borderWidth: 1
+                                    },
+                                    {
+                                        label: 'Disagreement %',
+                                        data: disagreementPercentages,
+                                        backgroundColor: '#ef4444',
+                                        borderColor: '#dc2626',
+                                        borderWidth: 1
+                                    }
+                                ]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    title: {
+                                        display: true,
+                                        text: 'Agreement vs Disagreement by Category (%)'
+                                    },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function(context) {
+                                                return `${context.dataset.label}: ${context.parsed.y}%`;
+                                            }
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: {
+                                        ticks: {
+                                            maxRotation: 45
+                                        }
+                                    },
+                                    y: {
+                                        beginAtZero: true,
+                                        max: 100,
+                                        ticks: {
+                                            callback: function(value) {
+                                                return value + '%';
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Confidence Distribution Chart
+                    if (confidenceDistributionChartRef.current && analysisData.confidenceDistribution) {
+                        const categories = Object.keys(analysisData.confidenceDistribution).slice(0, 8);
+                        const confidenceData = categories.map(category => {
+                            const data = analysisData.confidenceDistribution[category];
+                            return {
+                                category,
+                                average: Math.round(data.average * 100),
+                                min: Math.round(data.min * 100),
+                                max: Math.round(data.max * 100),
+                                count: data.count
+                            };
+                        });
+
+                        const ctx = confidenceDistributionChartRef.current.getContext('2d');
+                        confidenceDistributionChartRef.current.chartInstance = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: confidenceData.map(d => d.category),
+                                datasets: [{
+                                    label: 'Average Confidence %',
+                                    data: confidenceData.map(d => d.average),
+                                    backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                                    borderColor: 'rgba(59, 130, 246, 1)',
+                                    borderWidth: 1
+                                }, {
+                                    label: 'Min Confidence %',
+                                    data: confidenceData.map(d => d.min),
+                                    backgroundColor: 'rgba(239, 68, 68, 0.5)',
+                                    borderColor: 'rgba(239, 68, 68, 1)',
+                                    borderWidth: 1
+                                }, {
+                                    label: 'Max Confidence %',
+                                    data: confidenceData.map(d => d.max),
+                                    backgroundColor: 'rgba(16, 185, 129, 0.5)',
+                                    borderColor: 'rgba(16, 185, 129, 1)',
+                                    borderWidth: 1
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    title: {
+                                        display: true,
+                                        text: 'Confidence Score Distribution by Category'
+                                    },
+                                    legend: {
+                                        display: true
+                                    }
+                                },
+                                scales: {
+                                    y: {
+                                        beginAtZero: true,
+                                        max: 100,
+                                        ticks: {
+                                            callback: function(value) {
+                                                return value + '%';
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Category Migration Chart
+                    if (categoryMigrationChartRef.current && analysisData.categoryMigration) {
+                        const migrations = Object.values(analysisData.categoryMigration)
+                            .sort((a, b) => b.count - a.count)
+                            .slice(0, 10); // Top 10 migrations
+
+                        if (migrations.length > 0) {
+                            const ctx = categoryMigrationChartRef.current.getContext('2d');
+                            categoryMigrationChartRef.current.chartInstance = new Chart(ctx, {
+                                type: 'bar',
+                                data: {
+                                    labels: migrations.map(m => `${m.from} → ${m.to}`),
+                                    datasets: [{
+                                        label: 'Migration Count',
+                                        data: migrations.map(m => m.count),
+                                        backgroundColor: 'rgba(147, 51, 234, 0.7)',
+                                        borderColor: 'rgba(147, 51, 234, 1)',
+                                        borderWidth: 1
+                                    }]
+                                },
+                                options: {
+                                    indexAxis: 'y',
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    plugins: {
+                                        title: {
+                                            display: true,
+                                            text: 'Most Common Category Disagreement Patterns'
+                                        },
+                                        legend: {
+                                            display: false
+                                        }
+                                    },
+                                    scales: {
+                                        x: {
+                                            beginAtZero: true
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                } catch (chartError) {
+                    console.error('Chart creation failed:', chartError);
+                    setError(`Chart creation failed: ${chartError.message}`);
+                }
+            };
+
+            // Export disagreement report
+            const exportDisagreements = () => {
+                if (!analysisData) return;
+
+                const csvData = analysisData.disagreements.map(d => ({
+                    Product: d.product,
+                    'Reviewer 1': d.reviewer1,
+                    'Category 1': d.category1,
+                    'Source 1': d.source1,
+                    'Reviewer 2': d.reviewer2,
+                    'Category 2': d.category2,
+                    'Source 2': d.source2
+                }));
+
+                const csv = Papa.unparse(csvData);
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `classification_disagreements_${new Date().toISOString().split('T')[0]}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 p-6">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h1 className="text-3xl font-bold text-gray-900">Classification Analytics</h1>
+                                    <p className="text-gray-600 mt-2">Compare classification results across multiple reviewers</p>
+                                </div>
+                                <a 
+                                    href="product-reviewer.html" 
+                                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                                >
+                                    ← Back to Classifier
+                                </a>
+                            </div>
+                        </div>
+
+                        {/* File Upload */}
+                        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                            <h2 className="text-xl font-semibold mb-4">Upload Classification Files</h2>
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
+                                <input
+                                    type="file"
+                                    accept=".csv"
+                                    multiple
+                                    onChange={handleFileUpload}
+                                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                                />
+                                <p className="text-sm text-gray-500 mt-2">
+                                    Upload 2 or more "Export labels" CSV files to compare classifications
+                                </p>
+                                <p className="text-xs text-gray-400 mt-1">
+                                    Expected format: product_id, supplier, name, suggested, confidence, decision, final_class, decided_at
+                                </p>
+                            </div>
+                            
+                            {files.length > 0 && (
+                                <div className="mt-4">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h3 className="font-medium text-gray-900">Uploaded Files:</h3>
+                                        <button
+                                            onClick={clearAllFiles}
+                                            className="text-red-600 hover:text-red-800 text-sm px-3 py-1 border border-red-300 rounded hover:bg-red-50 transition-colors"
+                                        >
+                                            Clear All
+                                        </button>
+                                    </div>
+                                    <div className="space-y-1">
+                                        {files.map((file, index) => (
+                                            <div key={index} className="flex items-center justify-between text-sm">
+                                                <div className="flex items-center text-gray-600">
+                                                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                                                    {file.name} ({file.data.length} products)
+                                                </div>
+                                                <span className="text-xs text-gray-400">{file.reviewer}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {files.length === 1 && (
+                                        <p className="text-sm text-orange-600 mt-2">
+                                            Upload at least one more file to start comparison analysis
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {loading && (
+                            <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                                <div className="flex items-center justify-center">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                                    <span className="ml-3 text-gray-600">Analyzing classifications...</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {error && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                                <p className="text-red-800">{error}</p>
+                            </div>
+                        )}
+
+                        {analysisData && (
+                            <>
+                                {/* Summary Stats */}
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                                    <div className="bg-white rounded-lg shadow-sm p-6">
+                                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Products Compared</h3>
+                                        <p className="text-3xl font-bold text-blue-600">{analysisData.totalProducts}</p>
+                                    </div>
+                                    <div className="bg-white rounded-lg shadow-sm p-6">
+                                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Agreement Rate</h3>
+                                        <p className="text-3xl font-bold text-green-600">{analysisData.agreementRate.toFixed(1)}%</p>
+                                    </div>
+                                    <div className="bg-white rounded-lg shadow-sm p-6">
+                                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Agreements</h3>
+                                        <p className="text-3xl font-bold text-green-600">{analysisData.agreements.length}</p>
+                                    </div>
+                                    <div className="bg-white rounded-lg shadow-sm p-6">
+                                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Disagreements</h3>
+                                        <p className="text-3xl font-bold text-red-600">{analysisData.disagreements.length}</p>
+                                    </div>
+                                </div>
+
+                                {/* Charts */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                                    <div className="bg-white rounded-lg shadow-sm p-6">
+                                        <div className="chart-container">
+                                            <canvas ref={agreementChartRef}></canvas>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg shadow-sm p-6">
+                                        <div className="chart-container">
+                                            <canvas ref={categoryChartRef}></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Category Percentage Chart */}
+                                <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                                    <div className="chart-container">
+                                        <canvas ref={categoryPercentageChartRef}></canvas>
+                                    </div>
+                                </div>
+
+                                {/* Confidence Distribution Chart */}
+                                <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                                    <div className="chart-container">
+                                        <canvas ref={confidenceDistributionChartRef}></canvas>
+                                    </div>
+                                </div>
+
+                                {/* Category Migration Chart */}
+                                <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                                    <div className="chart-container">
+                                        <canvas ref={categoryMigrationChartRef}></canvas>
+                                    </div>
+                                </div>
+
+                                {/* Low Confidence Alerts */}
+                                {analysisData.lowConfidenceAlerts && analysisData.lowConfidenceAlerts.length > 0 && (
+                                    <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                                        <h2 className="text-xl font-semibold text-red-600 mb-4">🚨 Low Confidence Products - Priority Review Needed</h2>
+                                        <p className="text-sm text-gray-600 mb-4">
+                                            Products with consistently low confidence scores across reviewers (avg &lt; 60% or max &lt; 70%)
+                                        </p>
+                                        <div className="overflow-x-auto">
+                                            <table className="min-w-full table-auto">
+                                                <thead>
+                                                    <tr className="bg-gray-50">
+                                                        <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Product</th>
+                                                        <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Supplier</th>
+                                                        <th className="px-4 py-2 text-center text-sm font-medium text-gray-700">Avg Confidence</th>
+                                                        <th className="px-4 py-2 text-center text-sm font-medium text-gray-700">Max Confidence</th>
+                                                        <th className="px-4 py-2 text-center text-sm font-medium text-gray-700">Reviewers</th>
+                                                        <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Categories</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {analysisData.lowConfidenceAlerts.slice(0, 20).map((alert, index) => (
+                                                        <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                            <td className="px-4 py-2 text-sm">{alert.product}</td>
+                                                            <td className="px-4 py-2 text-sm">{alert.supplier}</td>
+                                                            <td className="px-4 py-2 text-center text-sm">
+                                                                <span className={`font-medium ${alert.avgConfidence < 0.5 ? 'text-red-600' : alert.avgConfidence < 0.6 ? 'text-orange-600' : 'text-yellow-600'}`}>
+                                                                    {Math.round(alert.avgConfidence * 100)}%
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-2 text-center text-sm">
+                                                                <span className={`font-medium ${alert.maxConfidence < 0.6 ? 'text-red-600' : alert.maxConfidence < 0.7 ? 'text-orange-600' : 'text-yellow-600'}`}>
+                                                                    {Math.round(alert.maxConfidence * 100)}%
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-2 text-center text-sm">{alert.reviewerCount}</td>
+                                                            <td className="px-4 py-2 text-sm">
+                                                                <div className="flex flex-wrap gap-1">
+                                                                    {alert.categories.slice(0, 3).map((category, catIndex) => (
+                                                                        <span key={catIndex} className="inline-block bg-gray-200 rounded px-2 py-1 text-xs">
+                                                                            {category}
+                                                                        </span>
+                                                                    ))}
+                                                                    {alert.categories.length > 3 && (
+                                                                        <span className="inline-block text-xs text-gray-500">
+                                                                            +{alert.categories.length - 3} more
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {analysisData.lowConfidenceAlerts.length > 20 && (
+                                            <p className="text-sm text-gray-500 mt-4">
+                                                Showing 20 of {analysisData.lowConfidenceAlerts.length} low-confidence products. Export full report for complete data.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Reviewer Statistics */}
+                                <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h2 className="text-xl font-semibold">Reviewer Statistics</h2>
+                                        <button
+                                            onClick={exportDisagreements}
+                                            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+                                        >
+                                            Export Disagreements CSV
+                                        </button>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full divide-y divide-gray-200">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reviewer</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Classifications</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reassigned</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reassignment Rate</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agreements</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disagreements</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agreement Rate</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-gray-200">
+                                                {Object.entries(analysisData.reviewerStats).map(([reviewer, stats]) => {
+                                                    const reassignmentRate = stats.total > 0 ? (stats.reassigned / stats.total * 100) : 0;
+                                                    const agreementRate = (stats.agreements + stats.disagreements) > 0 ? 
+                                                        (stats.agreements / (stats.agreements + stats.disagreements) * 100) : 0;
+                                                    
+                                                    return (
+                                                        <tr key={reviewer}>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{reviewer}</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{stats.total}</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{stats.reassigned}</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{reassignmentRate.toFixed(1)}%</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">{stats.agreements}</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">{stats.disagreements}</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{agreementRate.toFixed(1)}%</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* Recent Disagreements */}
+                                <div className="bg-white rounded-lg shadow-sm p-6">
+                                    <h2 className="text-xl font-semibold mb-4">Recent Disagreements</h2>
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full divide-y divide-gray-200">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reviewer 1</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category 1</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reviewer 2</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category 2</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-gray-200">
+                                                {analysisData.disagreements.slice(0, 20).map((disagreement, index) => (
+                                                    <tr key={index}>
+                                                        <td className="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">{disagreement.product}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{disagreement.reviewer1}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                            <span className={`px-2 py-1 text-xs rounded-full ${disagreement.source1 === 'reassigned' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`}>
+                                                                {disagreement.category1}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{disagreement.reviewer2}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                            <span className={`px-2 py-1 text-xs rounded-full ${disagreement.source2 === 'reassigned' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`}>
+                                                                {disagreement.category2}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {analysisData.disagreements.length > 20 && (
+                                        <p className="text-sm text-gray-500 mt-4 text-center">
+                                            Showing 20 of {analysisData.disagreements.length} disagreements. Export full report for complete data.
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Regex Pattern Suggestions */}
+                                <div className="bg-white rounded-lg shadow-sm p-6">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-xl font-semibold">Regex Pattern Suggestions</h2>
+                                        <div className="flex items-center space-x-4">
+                                            <label className="text-sm text-gray-600">
+                                                Confidence threshold: {Math.round(regexConfidenceThreshold * 100)}%
+                                            </label>
+                                            <input 
+                                                type="range"
+                                                min="0.5"
+                                                max="0.95"
+                                                step="0.05"
+                                                value={regexConfidenceThreshold}
+                                                onChange={(e) => setRegexConfidenceThreshold(Number(e.target.value))}
+                                                className="w-32"
+                                            />
+                                        </div>
+                                    </div>
+                                    
+                                    {(() => {
+                                        console.log('Rendering regex patterns, count:', Object.keys(currentRegexPatterns).length, currentRegexPatterns);
+                                        return currentRegexPatterns && Object.keys(currentRegexPatterns).length > 0;
+                                    })() ? (
+                                        <>
+                                            <p className="text-sm text-gray-600 mb-4">
+                                                Common words from high-confidence classifications that could be used for regex preprocessing
+                                            </p>
+                                            
+                                            <div className="space-y-6">
+                                                {Object.entries(currentRegexPatterns).map(([category, patterns]) => (
+                                                    <div key={category} className="border rounded-lg p-4">
+                                                        <h3 className="text-lg font-medium text-gray-900 mb-3">{category}</h3>
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                            {patterns.map((pattern, index) => (
+                                                                <div key={index} className="bg-gray-50 rounded p-3">
+                                                                    <div className="flex items-center justify-between mb-2">
+                                                                        <span className="font-medium text-gray-900">"{pattern.word}"</span>
+                                                                    <div className="flex items-center space-x-2">
+                                                                        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                                                            {pattern.count}x
+                                                                        </span>
+                                                                        <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                                                                            {(pattern.avgConfidence * 100).toFixed(0)}%
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="text-xs text-gray-600 mb-2">
+                                                                    <strong>Regex:</strong> 
+                                                                    <code className="bg-gray-200 px-1 ml-1 rounded">{pattern.suggestedRegex}</code>
+                                                                </div>
+                                                                <div className="text-xs text-gray-500">
+                                                                    <strong>Examples:</strong><br/>
+                                                                    {pattern.examples.slice(0, 2).map((example, i) => (
+                                                                        <div key={i} className="truncate">• {example}</div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        </>
+                                    ) : (
+                                        <div className="text-center py-8 text-gray-500">
+                                            <p>No patterns found at this confidence level.</p>
+                                            <p className="text-sm mt-2">Try lowering the confidence threshold to see more patterns.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<ClassificationAnalytics />, document.getElementById('root'));
+    </script>
+</body>
+</html>
