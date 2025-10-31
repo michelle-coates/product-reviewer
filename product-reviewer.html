@@ -71,6 +71,15 @@
             background: #2563eb;
         }
         
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #059669;
+        }
+        
         .btn-secondary {
             background: #6b7280;
             color: white;
@@ -250,6 +259,7 @@
             "Other",
             "Plasterboard",
             "Plumbing",
+            "Structural Steel",
             "Timber",
         ];
 
@@ -281,7 +291,8 @@
 
         function Button({ children, onClick, variant = "primary", disabled = false, className = "" }) {
             const variantClass = variant === "secondary" ? "btn-secondary" : 
-                               variant === "outline" ? "btn-outline" : "btn-primary";
+                               variant === "outline" ? "btn-outline" : 
+                               variant === "success" ? "btn-success" : "btn-primary";
             return (
                 <button 
                     className={`btn ${variantClass} ${className}`}
@@ -771,7 +782,7 @@
 
                                         {/* Actions */}
                                         <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "8px"}}>
-                                            <Button onClick={handleAccept}>
+                                            <Button variant="success" onClick={handleAccept}>
                                                 ✓ Accept (A)
                                             </Button>
 
@@ -786,7 +797,7 @@
                                                     ))}
                                                 </Select>
                                                 <Button 
-                                                    variant="secondary" 
+                                                    variant="primary" 
                                                     onClick={onReassignConfirm} 
                                                     disabled={!pendingReassign}
                                                 >
