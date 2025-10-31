@@ -1,6 +1,6 @@
 # Product Group Reviewer
 
-A browser-compatible React application for reviewing and classifying product groups with intelligent similarity matching and batch processing capabilities.
+A browser-compatible React application for reviewing and classifying construction product groups with intelligent similarity matching and batch processing capabilities.
 
 ## Features
 
